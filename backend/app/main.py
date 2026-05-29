@@ -34,12 +34,26 @@ def _migrate_sqlite_columns() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     import app.models  # noqa: F401 — ensure all models are registered
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     _migrate_sqlite_columns()
+
+    await asyncio.to_thread(_seed_demo_if_needed)
     logger.info("Database tables created")
+
+
+def _seed_demo_if_needed() -> None:
+    from app.services.seed_bundle import load_demo_bundle_if_empty
+
+    try:
+        if load_demo_bundle_if_empty():
+            logger.info("Demo bundle loaded into empty database")
+    except Exception:
+        logger.exception("Failed to seed demo bundle")
 
     yield
 
@@ -69,3 +83,13 @@ app.include_router(books_router)
 @app.get(settings.route_prefix("/health"))
 async def health_check():
     return {"status": "ok", "service": "framecheck"}
+
+
+@app.post(settings.route_prefix("/seed-demo"))
+async def seed_demo():
+    import asyncio
+
+    from app.services.seed_bundle import load_demo_bundle_if_empty
+
+    seeded = await asyncio.to_thread(load_demo_bundle_if_empty)
+    return {"seeded": seeded}

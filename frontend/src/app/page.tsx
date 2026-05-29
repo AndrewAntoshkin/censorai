@@ -139,6 +139,12 @@ export default function HomePage() {
 
               {activeTab === "projects" && viewMode === "grid" && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {projects.length === 0 && (
+                    <div className="col-span-full rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+                      Пока нет проектов. Загрузите видео или обновите страницу — демо-примеры
+                      подгружаются при первом запуске сервера.
+                    </div>
+                  )}
                   {projects.map((project) => (
                     <Link
                       key={project.id}
