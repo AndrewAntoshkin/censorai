@@ -1,0 +1,32 @@
+# Blueprint: https://render.com/deploy?repo=https://github.com/AndrewAntoshkin/censorai
+services:
+  - type: web
+    name: censorai-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: censorai-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////data/censorai.db
+      - key: DATABASE_URL_SYNC
+        value: sqlite:////data/censorai.db
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: VIDEO_PROVIDER
+        value: replicate
+      - key: REPLICATE_MODEL
+        value: google/gemini-3.5-flash
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: INLINE_VIDEO_MAX_MB
+        value: "40"
+      - key: GEMINI_MAX_CONCURRENT
+        value: "2"
