@@ -65,6 +65,6 @@ app.include_router(files_router)
 app.include_router(books_router)
 
 
-@app.get("/api/health")
+@app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "framecheck"}

@@ -20,7 +20,7 @@ from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/files", tags=["files"])
+router = APIRouter(prefix="/files", tags=["files"])
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:

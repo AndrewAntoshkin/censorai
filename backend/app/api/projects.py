@@ -14,7 +14,7 @@ from app.schemas.project import (
 )
 from app.services.storage_service import storage_service
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 @router.get("", response_model=list[ProjectResponse])
