@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
@@ -142,33 +141,20 @@ async def register_from_blob(
     db: AsyncSession = Depends(get_db),
 ):
     size_mb = data.size / (1024 * 1024)
-    if size_mb > settings.UPLOAD_MAX_SIZE_MB:
+    if size_mb > settings.INLINE_VIDEO_MAX_MB:
         raise HTTPException(
             status_code=413,
             detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
         )
 
-    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-        response = await client.get(data.blob_url)
-    if response.status_code >= 400:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to download blob: HTTP {response.status_code}",
-        )
-
-    content = response.content
-    storage_path = await storage_service.save_upload(
-        project_id, data.filename, content
-    )
-
     video = VideoFile(
         name=data.filename,
-        size=len(content),
+        size=data.size,
         status="uploaded",
         progress=100,
         project_id=project_id,
         folder_id=folder_id,
-        storage_path=storage_path,
+        storage_path=data.blob_url,
     )
     db.add(video)
     await db.flush()

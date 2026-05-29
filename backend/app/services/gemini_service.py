@@ -115,16 +115,25 @@ class GeminiService:
 
         raise RuntimeError(f"Analysis failed after {max_retries} retries") from last_error
 
-    def _video_to_data_uri(self, video_path: str) -> str:
-        """Encode the video as a base64 data URI passed inline to the model.
+    def _read_video_bytes(self, video_path: str) -> tuple[bytes, str]:
+        if video_path.startswith(("http://", "https://")):
+            import httpx
 
-        Passing the bytes inline (with an explicit mime type) is what the
-        Gemini-on-Replicate model reliably accepts — external URLs failed with
-        "Could not determine the mimetype". Inline payloads keep the file on our
-        own infrastructure (no third-party public host)."""
+            with httpx.Client(timeout=300, follow_redirects=True) as client:
+                response = client.get(video_path)
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").split(";")[0].strip()
+            if not content_type or content_type == "application/octet-stream":
+                content_type = mimetypes.guess_type(video_path.split("?")[0])[0] or "video/mp4"
+            return response.content, content_type
+
         content_type = mimetypes.guess_type(video_path)[0] or "video/mp4"
         with open(video_path, "rb") as video_file:
-            raw = video_file.read()
+            return video_file.read(), content_type
+
+    def _video_to_data_uri(self, video_path: str) -> str:
+        """Encode the video as a base64 data URI passed inline to the model."""
+        raw, content_type = self._read_video_bytes(video_path)
 
         size_mb = len(raw) / (1024 * 1024)
         if size_mb > settings.INLINE_VIDEO_MAX_MB:

@@ -19,6 +19,7 @@ interface UploadFile {
   file: File;
   progress: number;
   status: "pending" | "uploading" | "uploaded" | "analyzing" | "done" | "error";
+  statusHint?: string;
   error?: string;
   fileId?: string;
 }
@@ -98,18 +99,23 @@ async function waitForAnalysis(
 async function uploadFileToProject(
   file: File,
   projectId: string,
-  onProgress: (progress: number) => void
+  onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload(file)) {
     const { upload } = await import("@vercel/blob/client");
+    onProgress(5, "Подключение к хранилищу…");
     const blob = await upload(file.name, file, {
       access: "public",
       handleUploadUrl: "/upload/blob",
+      multipart: file.size > 20 * 1024 * 1024,
       onUploadProgress: ({ percentage }) =>
-        onProgress(Math.round(percentage * 0.45)),
+        onProgress(
+          Math.max(5, Math.round(percentage * 0.85)),
+          `Загрузка в облако… ${Math.round(percentage)}%`
+        ),
     });
 
-    onProgress(50);
+    onProgress(90, "Регистрация файла…");
     const res = await fetch(
       `${getApiBase()}/api/files/from-blob?project_id=${encodeURIComponent(projectId)}`,
       {
@@ -122,7 +128,11 @@ async function uploadFileToProject(
         }),
       }
     );
-    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Upload failed: ${res.status} ${body}`);
+    }
+    onProgress(100, "Файл загружен");
     return res.json();
   }
 
@@ -183,17 +193,22 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
     for (let i = 0; i < files.length; i++) {
       if (files[i].status !== "pending") continue;
 
-      updateFile(i, { status: "uploading", progress: 10 });
+      updateFile(i, { status: "uploading", progress: 5, statusHint: "Старт…" });
 
       try {
         const uploadedFile = await uploadFileToProject(
           files[i].file,
           projectId,
-          (progress) => updateFile(i, { progress })
+          (progress, hint) => updateFile(i, { progress, statusHint: hint })
         );
-        updateFile(i, { status: "uploaded", progress: 50, fileId: uploadedFile.id });
+        updateFile(i, {
+          status: "uploaded",
+          progress: 100,
+          fileId: uploadedFile.id,
+          statusHint: "Запуск анализа…",
+        });
 
-        updateFile(i, { status: "analyzing", progress: 60 });
+        updateFile(i, { status: "analyzing", progress: 10, statusHint: "Отправка в Replicate…" });
         const idx = i;
         const creep = setInterval(() => {
           setFiles((prev) =>
@@ -207,7 +222,11 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
 
         try {
           await waitForAnalysis(uploadedFile.id, (progress) =>
-            updateFile(i, { status: "analyzing", progress })
+            updateFile(i, {
+              status: "analyzing",
+              progress,
+              statusHint: "Анализ видео · обычно 1–3 мин",
+            })
           );
         } finally {
           clearInterval(creep);
@@ -298,7 +317,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
                       <Progress value={uploadFile.progress} className="h-1.5" />
                       <div className="flex items-center gap-1.5 text-xs text-primary">
                         <Loader2 className="h-3 w-3 animate-spin" />
-                        {STATUS_LABELS[uploadFile.status]}
+                        {uploadFile.statusHint || STATUS_LABELS[uploadFile.status]}
                       </div>
                     </div>
                   )}
