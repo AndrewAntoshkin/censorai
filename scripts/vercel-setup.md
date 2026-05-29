@@ -14,6 +14,12 @@
 | `REPLICATE_MODEL` | `google/gemini-3.5-flash` |
 | `VIDEO_PROVIDER` | `replicate` |
 
+### Blob Storage (для файлов > 4 МБ)
+
+1. Vercel Dashboard → проект → **Storage** → **Create Database** → **Blob**
+2. Подключите store к проекту — появится `BLOB_READ_WRITE_TOKEN`
+3. Redeploy
+
 ## 3. Deploy
 
 После деплоя:

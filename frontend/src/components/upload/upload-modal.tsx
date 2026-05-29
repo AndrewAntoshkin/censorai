@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, type VideoFileAPI } from "@/lib/api";
 
 interface UploadFile {
   file: File;
@@ -28,10 +28,27 @@ interface UploadModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024;
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
+}
+
+function displayFileName(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+function shouldUseBlobUpload(file: File): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  return !isLocal || file.size > DIRECT_UPLOAD_LIMIT;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -42,6 +59,83 @@ const STATUS_LABELS: Record<string, string> = {
   done: "Анализ завершён",
   error: "Ошибка",
 };
+
+async function waitForAnalysis(
+  fileId: string,
+  onProgress: (progress: number) => void
+): Promise<void> {
+  const analyzeRes = await fetch(`${getApiBase()}/api/files/${fileId}/analyze`, {
+    method: "POST",
+  });
+
+  if (analyzeRes.status === 202) {
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+      if (!statusRes.ok) continue;
+      const fileState = await statusRes.json();
+      if (fileState.status === "analyzed") return;
+      if (fileState.status === "error") {
+        throw new Error("Analysis failed on server");
+      }
+      onProgress(Math.min(95, fileState.progress ?? 70));
+    }
+    const finalRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+    const finalFile = await finalRes.json();
+    if (finalFile.status !== "analyzed") {
+      throw new Error("Analysis timed out");
+    }
+    return;
+  }
+
+  if (!analyzeRes.ok) {
+    const errBody = await analyzeRes.text();
+    throw new Error(`Analysis failed: ${errBody}`);
+  }
+}
+
+async function uploadFileToProject(
+  file: File,
+  projectId: string,
+  onProgress: (progress: number) => void
+): Promise<VideoFileAPI> {
+  if (shouldUseBlobUpload(file)) {
+    const { upload } = await import("@vercel/blob/client");
+    const blob = await upload(file.name, file, {
+      access: "public",
+      handleUploadUrl: "/upload/blob",
+      onUploadProgress: ({ percentage }) =>
+        onProgress(Math.round(percentage * 0.45)),
+    });
+
+    onProgress(50);
+    const res = await fetch(
+      `${getApiBase()}/api/files/from-blob?project_id=${encodeURIComponent(projectId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blob_url: blob.url,
+          filename: file.name,
+          size: file.size,
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    return res.json();
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const uploadRes = await fetch(
+    `${getApiBase()}/api/files/upload?project_id=${encodeURIComponent(projectId)}`,
+    { method: "POST", body: formData }
+  );
+  if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
+  onProgress(50);
+  return uploadRes.json();
+}
 
 export function UploadModal({ open, onOpenChange }: UploadModalProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -92,20 +186,14 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
       updateFile(i, { status: "uploading", progress: 10 });
 
       try {
-        const formData = new FormData();
-        formData.append("file", files[i].file);
-
-        const uploadRes = await fetch(
-          `${getApiBase()}/api/files/upload?project_id=${projectId}`,
-          { method: "POST", body: formData }
+        const uploadedFile = await uploadFileToProject(
+          files[i].file,
+          projectId,
+          (progress) => updateFile(i, { progress })
         );
-
-        if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
-        const uploadedFile = await uploadRes.json();
         updateFile(i, { status: "uploaded", progress: 50, fileId: uploadedFile.id });
 
         updateFile(i, { status: "analyzing", progress: 60 });
-        // Creeping progress so the long analysis call doesn't look frozen.
         const idx = i;
         const creep = setInterval(() => {
           setFiles((prev) =>
@@ -117,40 +205,12 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
           );
         }, 1500);
 
-        let analyzeRes: Response;
         try {
-          analyzeRes = await fetch(
-            `${getApiBase()}/api/files/${uploadedFile.id}/analyze`,
-            { method: "POST" }
+          await waitForAnalysis(uploadedFile.id, (progress) =>
+            updateFile(i, { status: "analyzing", progress })
           );
         } finally {
           clearInterval(creep);
-        }
-
-        if (analyzeRes.status === 202) {
-          const deadline = Date.now() + 30 * 60 * 1000;
-          while (Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 5000));
-            const statusRes = await fetch(`${getApiBase()}/api/files/${uploadedFile.id}`);
-            if (!statusRes.ok) continue;
-            const fileState = await statusRes.json();
-            if (fileState.status === "analyzed") break;
-            if (fileState.status === "error") {
-              throw new Error("Analysis failed on server");
-            }
-            updateFile(i, {
-              status: "analyzing",
-              progress: Math.min(95, fileState.progress ?? 70),
-            });
-          }
-          const finalRes = await fetch(`${getApiBase()}/api/files/${uploadedFile.id}`);
-          const finalFile = await finalRes.json();
-          if (finalFile.status !== "analyzed") {
-            throw new Error("Analysis timed out");
-          }
-        } else if (!analyzeRes.ok) {
-          const errBody = await analyzeRes.text();
-          throw new Error(`Analysis failed: ${errBody}`);
         }
 
         updateFile(i, { status: "done", progress: 100 });
@@ -227,7 +287,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 flex items-center justify-between">
                     <p className="truncate text-sm font-medium text-foreground">
-                      {uploadFile.file.name}
+                      {displayFileName(uploadFile.file.name)}
                     </p>
                     <span className="ml-2 shrink-0 text-xs text-muted-foreground">
                       {formatFileSize(uploadFile.file.size)}

@@ -47,6 +47,12 @@ class VideoFileResponse(BaseModel):
     updated_at: datetime
 
 
+class BlobUploadRequest(BaseModel):
+    blob_url: str
+    filename: str
+    size: int
+
+
 class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

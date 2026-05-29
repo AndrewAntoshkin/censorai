@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
@@ -13,7 +14,7 @@ from app.core.database import get_db
 from app.models.analysis import Analysis, Scene
 from app.models.project import VideoFile
 from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
-from app.schemas.project import VideoFileResponse
+from app.schemas.project import BlobUploadRequest, VideoFileResponse
 from app.services.docx_service import generate_report
 from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
@@ -120,6 +121,48 @@ async def upload_file(
 
     video = VideoFile(
         name=file.filename,
+        size=len(content),
+        status="uploaded",
+        progress=100,
+        project_id=project_id,
+        folder_id=folder_id,
+        storage_path=storage_path,
+    )
+    db.add(video)
+    await db.flush()
+    await db.refresh(video)
+    return video
+
+
+@router.post("/from-blob", response_model=VideoFileResponse, status_code=201)
+async def register_from_blob(
+    project_id: str,
+    data: BlobUploadRequest,
+    folder_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    size_mb = data.size / (1024 * 1024)
+    if size_mb > settings.UPLOAD_MAX_SIZE_MB:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
+        )
+
+    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+        response = await client.get(data.blob_url)
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to download blob: HTTP {response.status_code}",
+        )
+
+    content = response.content
+    storage_path = await storage_service.save_upload(
+        project_id, data.filename, content
+    )
+
+    video = VideoFile(
+        name=data.filename,
         size=len(content),
         status="uploaded",
         progress=100,
