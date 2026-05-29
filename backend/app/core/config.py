@@ -1,4 +1,12 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_api_prefix() -> str:
+    if os.getenv("API_PREFIX") is not None:
+        return os.getenv("API_PREFIX", "")
+    return "" if os.getenv("VERCEL") else "/api"
 
 
 class Settings(BaseSettings):
@@ -29,15 +37,19 @@ class Settings(BaseSettings):
 
     GEMINI_MAX_CONCURRENT: int = 3
 
-    # Max size for inline (base64 data-URI) video sent to the model.
-    # The Gemini-on-Replicate model reliably accepts inline videos; large files
-    # should be analysed as shorter fragments.
     INLINE_VIDEO_MAX_MB: int = 40
 
-    # Optional egress proxy (e.g. for the geo-restricted direct Google Gemini API).
     HTTPS_PROXY_URL: str = ""
 
     VIDEO_PROVIDER: str = "replicate"  # "replicate" | "gemini"
+
+    API_PREFIX: str = _default_api_prefix()
+
+    def route_prefix(self, path: str) -> str:
+        segment = path if path.startswith("/") else f"/{path}"
+        if not self.API_PREFIX:
+            return segment
+        return f"{self.API_PREFIX.rstrip('/')}{segment}"
 
 
 settings = Settings()

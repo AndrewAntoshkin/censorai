@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.project import Folder, Project, VideoFile
 from app.schemas.project import (
@@ -14,7 +15,7 @@ from app.schemas.project import (
 )
 from app.services.storage_service import storage_service
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+router = APIRouter(prefix=settings.route_prefix("/projects"), tags=["projects"])
 
 
 @router.get("", response_model=list[ProjectResponse])

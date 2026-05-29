@@ -20,7 +20,7 @@ from app.services.text_analysis_service import text_analysis_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/books", tags=["books"])
+router = APIRouter(prefix=settings.route_prefix("/books"), tags=["books"])
 
 ALLOWED_EXTENSIONS = {".pdf"}
 

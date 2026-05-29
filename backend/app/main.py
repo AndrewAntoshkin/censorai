@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.books import router as books_router
 from app.api.files import router as files_router
 from app.api.projects import router as projects_router
+from app.core.config import settings
 from app.core.database import Base, engine
 
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +66,6 @@ app.include_router(files_router)
 app.include_router(books_router)
 
 
-@app.get("/health")
+@app.get(settings.route_prefix("/health"))
 async def health_check():
     return {"status": "ok", "service": "framecheck"}
