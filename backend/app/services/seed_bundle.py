@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,35 @@ logger = logging.getLogger(__name__)
 
 BUNDLE_PATH = Path(__file__).resolve().parents[2] / "demo" / "bundle.json"
 DEMO_MARKER = "Демо — видеоконтент"
+
+_seed_lock = threading.Lock()
+_demo_ready = False
+
+
+def _demo_exists() -> bool:
+    engine = create_engine(settings.DATABASE_URL_SYNC)
+    with Session(engine) as session:
+        return bool(
+            session.scalar(select(Project.id).where(Project.name == DEMO_MARKER))
+        )
+
+
+def ensure_demo_seeded() -> bool:
+    """Load demo bundle once per process if the demo project is missing."""
+    global _demo_ready
+
+    with _seed_lock:
+        if _demo_ready:
+            return False
+
+        if _demo_exists():
+            _demo_ready = True
+            return False
+
+        seeded = load_demo_bundle_if_empty()
+        if seeded or _demo_exists():
+            _demo_ready = True
+        return seeded
 
 
 def _parse_dt(value: str | None) -> datetime | None:

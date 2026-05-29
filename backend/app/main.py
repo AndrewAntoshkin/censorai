@@ -45,19 +45,19 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(_seed_demo_if_needed)
     logger.info("Database tables created")
 
-
-def _seed_demo_if_needed() -> None:
-    from app.services.seed_bundle import load_demo_bundle_if_empty
-
-    try:
-        if load_demo_bundle_if_empty():
-            logger.info("Demo bundle loaded into empty database")
-    except Exception:
-        logger.exception("Failed to seed demo bundle")
-
     yield
 
     await engine.dispose()
+
+
+def _seed_demo_if_needed() -> None:
+    from app.services.seed_bundle import ensure_demo_seeded
+
+    try:
+        if ensure_demo_seeded():
+            logger.info("Demo bundle loaded into empty database")
+    except Exception:
+        logger.exception("Failed to seed demo bundle")
 
 
 app = FastAPI(
@@ -89,7 +89,7 @@ async def health_check():
 async def seed_demo():
     import asyncio
 
-    from app.services.seed_bundle import load_demo_bundle_if_empty
+    from app.services.seed_bundle import ensure_demo_seeded
 
-    seeded = await asyncio.to_thread(load_demo_bundle_if_empty)
+    seeded = await asyncio.to_thread(ensure_demo_seeded)
     return {"seeded": seeded}

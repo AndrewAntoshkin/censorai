@@ -3,7 +3,7 @@
 import { AppLayout } from "@/components/layout/app-layout";
 import { Search, Folder, Film, LayoutGrid, List, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
+import { api, getApiBase, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -18,14 +18,29 @@ export default function HomePage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.projects.list(), api.files.recent(12)])
-      .then(([p, r]) => {
+
+    async function loadHome() {
+      try {
+        let [p, r] = await Promise.all([api.projects.list(), api.files.recent(12)]);
+
+        if (p.length === 0 && r.length === 0) {
+          await fetch(`${getApiBase()}/api/seed-demo`, {
+            method: "POST",
+          }).catch(() => null);
+          [p, r] = await Promise.all([api.projects.list(), api.files.recent(12)]);
+        }
+
         if (!active) return;
         setProjects(p);
         setRecent(r);
-      })
-      .catch(() => {})
-      .finally(() => active && setLoading(false));
+      } catch {
+        // keep empty state
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadHome();
     return () => {
       active = false;
     };

@@ -13,6 +13,7 @@ from app.schemas.project import (
     ProjectDetailResponse,
     ProjectResponse,
 )
+from app.services.seed_bundle import ensure_demo_seeded
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix=settings.route_prefix("/projects"), tags=["projects"])
@@ -20,6 +21,10 @@ router = APIRouter(prefix=settings.route_prefix("/projects"), tags=["projects"])
 
 @router.get("", response_model=list[ProjectResponse])
 async def list_projects(db: AsyncSession = Depends(get_db)):
+    import asyncio
+
+    await asyncio.to_thread(ensure_demo_seeded)
+
     stmt = (
         select(Project, func.count(VideoFile.id))
         .outerjoin(VideoFile, VideoFile.project_id == Project.id)
