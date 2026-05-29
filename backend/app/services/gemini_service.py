@@ -135,6 +135,38 @@ class GeminiService:
         encoded = base64.b64encode(raw).decode("ascii")
         return f"data:{content_type};base64,{encoded}"
 
+    def start_analysis(self, video_path: str) -> str:
+        """Start Replicate prediction without blocking (for serverless)."""
+        video_uri = self._video_to_data_uri(video_path)
+        prediction = self._client.predictions.create(
+            model=settings.REPLICATE_MODEL,
+            input={
+                "prompt": ANALYSIS_PROMPT,
+                "videos": [video_uri],
+                "max_output_tokens": 65535,
+                "temperature": 0.3,
+            },
+        )
+        return prediction.id
+
+    def poll_prediction(self, prediction_id: str) -> tuple[str, GeminiAnalysisResult | None]:
+        """Poll once. Returns (status, result) where result is set when succeeded."""
+        prediction = self._client.predictions.get(prediction_id)
+        status = prediction.status
+
+        if status in {"starting", "processing"}:
+            return status, None
+
+        if status != "succeeded":
+            raise RuntimeError(prediction.error or f"Prediction ended with status {status}")
+
+        output = prediction.output
+        if isinstance(output, list):
+            raw = "".join(str(chunk) for chunk in output)
+        else:
+            raw = str(output)
+        return status, self._parse_response(raw)
+
     def _run_model(self, video_url: str) -> str:
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,

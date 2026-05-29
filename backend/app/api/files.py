@@ -1,9 +1,9 @@
-import json
+import asyncio
 import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.analysis import Analysis, Scene
 from app.models.project import VideoFile
-from app.schemas.analysis import AnalysisResponse
+from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
 from app.schemas.project import VideoFileResponse
 from app.services.docx_service import generate_report
 from app.services.gemini_service import gemini_service
@@ -21,6 +21,81 @@ from app.services.storage_service import storage_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
+    if video.status != "analyzing" or not video.replicate_prediction_id:
+        return
+
+    try:
+        _status, result = await asyncio.to_thread(
+            gemini_service.poll_prediction, video.replicate_prediction_id
+        )
+    except Exception as e:
+        logger.exception("Poll failed for file %s", video.id)
+        video.status = "error"
+        video.replicate_prediction_id = None
+        await db.flush()
+        return
+
+    if result is None:
+        video.progress = min(95, video.progress + 5)
+        await db.flush()
+        return
+
+    await _save_analysis_result(video, db, result)
+    video.replicate_prediction_id = None
+
+
+async def _save_analysis_result(
+    video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
+) -> Analysis:
+    summary = _build_summary_dict(gemini_result)
+    analysis = Analysis(
+        video_file_id=video.id,
+        video_title=gemini_result.video_title or video.name,
+        duration=gemini_result.duration,
+        analyzed_at=datetime.now(timezone.utc),
+        status="completed",
+    )
+    analysis.summary = summary
+    db.add(analysis)
+    await db.flush()
+    await db.refresh(analysis)
+
+    for gs in gemini_result.scenes:
+        if gs.risks:
+            for risk_item in gs.risks:
+                scene = Scene(
+                    analysis_id=analysis.id,
+                    scene_number=gs.scene_number,
+                    start_time=gs.start_time,
+                    end_time=gs.end_time,
+                    description=gs.description,
+                    risk=risk_item.risk,
+                    risk_level=risk_item.risk_level,
+                    probability=risk_item.probability,
+                    reason=risk_item.reason,
+                    quote=risk_item.quote,
+                    text_in_frame=risk_item.text_in_frame,
+                    recommendation=risk_item.recommendation,
+                )
+                db.add(scene)
+        else:
+            scene = Scene(
+                analysis_id=analysis.id,
+                scene_number=gs.scene_number,
+                start_time=gs.start_time,
+                end_time=gs.end_time,
+                description=gs.description,
+            )
+            db.add(scene)
+
+    video.status = "analyzed"
+    video.progress = 100
+    video.analysis_id = analysis.id
+    await db.flush()
+    return analysis
 
 
 @router.post("/upload", response_model=VideoFileResponse, status_code=201)
@@ -86,6 +161,9 @@ async def get_file(file_id: str, db: AsyncSession = Depends(get_db)):
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="File not found")
+
+    await _maybe_finish_analysis(video, db)
+    await db.refresh(video)
     return video
 
 
@@ -95,7 +173,15 @@ async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
         select(VideoFile).where(VideoFile.id == file_id)
     )
     video = result.scalar_one_or_none()
-    if not video or not video.analysis_id:
+    if not video:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    await _maybe_finish_analysis(video, db)
+    await db.refresh(video)
+
+    if not video.analysis_id:
+        if video.status == "analyzing":
+            raise HTTPException(status_code=202, detail="Analysis in progress")
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     analysis_result = await db.execute(
@@ -109,7 +195,7 @@ async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
     return analysis
 
 
-@router.post("/{file_id}/analyze", response_model=AnalysisResponse)
+@router.post("/{file_id}/analyze")
 async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(VideoFile).where(VideoFile.id == file_id)
@@ -121,73 +207,43 @@ async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
 
+    if video.status == "analyzed" and video.analysis_id:
+        analysis_result = await db.execute(
+            select(Analysis)
+            .options(selectinload(Analysis.scenes))
+            .where(Analysis.id == video.analysis_id)
+        )
+        return analysis_result.scalar_one()
+
+    if video.status == "analyzing" and video.replicate_prediction_id:
+        return JSONResponse(
+            status_code=202,
+            content={"status": "analyzing", "file_id": file_id},
+        )
+
     video.status = "analyzing"
-    video.progress = 0
+    video.progress = 10
     await db.flush()
-    await db.commit()
 
     try:
-        gemini_result = await gemini_service.analyze_video(video.storage_path)
+        prediction_id = await asyncio.to_thread(
+            gemini_service.start_analysis, video.storage_path
+        )
     except Exception as e:
-        logger.exception("Analysis failed for file %s", file_id)
+        logger.exception("Failed to start analysis for file %s", file_id)
         video.status = "error"
         await db.flush()
-        await db.commit()
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}") from e
 
-    summary = _build_summary_dict(gemini_result)
-    analysis = Analysis(
-        video_file_id=file_id,
-        video_title=gemini_result.video_title or video.name,
-        duration=gemini_result.duration,
-        analyzed_at=datetime.now(timezone.utc),
-        status="completed",
-    )
-    analysis.summary = summary
-    db.add(analysis)
-    await db.flush()
-    await db.refresh(analysis)
-
-    for gs in gemini_result.scenes:
-        if gs.risks:
-            for risk_item in gs.risks:
-                scene = Scene(
-                    analysis_id=analysis.id,
-                    scene_number=gs.scene_number,
-                    start_time=gs.start_time,
-                    end_time=gs.end_time,
-                    description=gs.description,
-                    risk=risk_item.risk,
-                    risk_level=risk_item.risk_level,
-                    probability=risk_item.probability,
-                    reason=risk_item.reason,
-                    quote=risk_item.quote,
-                    text_in_frame=risk_item.text_in_frame,
-                    recommendation=risk_item.recommendation,
-                )
-                db.add(scene)
-        else:
-            scene = Scene(
-                analysis_id=analysis.id,
-                scene_number=gs.scene_number,
-                start_time=gs.start_time,
-                end_time=gs.end_time,
-                description=gs.description,
-            )
-            db.add(scene)
-
-    video.status = "analyzed"
-    video.progress = 100
-    video.analysis_id = analysis.id
+    video.replicate_prediction_id = prediction_id
+    video.progress = 30
     await db.flush()
     await db.commit()
 
-    analysis_result = await db.execute(
-        select(Analysis)
-        .options(selectinload(Analysis.scenes))
-        .where(Analysis.id == analysis.id)
+    return JSONResponse(
+        status_code=202,
+        content={"status": "analyzing", "file_id": file_id},
     )
-    return analysis_result.scalar_one()
 
 
 @router.get("/{file_id}/report")

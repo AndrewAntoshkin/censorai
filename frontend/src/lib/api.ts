@@ -6,7 +6,20 @@ import {
   getDemoRecent,
 } from "./demo-data";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (
+    typeof window !== "undefined" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+  ) {
+    return "";
+  }
+  return "http://localhost:8000";
+}
+
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 async function request<T>(
@@ -17,7 +30,7 @@ async function request<T>(
     return demoRequest<T>(path, options);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBase()}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...options?.headers,
@@ -171,7 +184,7 @@ export const api = {
       }
       return request<AnalysisAPI>(`/api/files/${id}/analyze`, { method: "POST" });
     },
-    getReportUrl: (id: string) => `${API_BASE}/api/files/${id}/report`,
+    getReportUrl: (id: string) => `${getApiBase()}/api/files/${id}/report`,
     upload: async (
       projectId: string,
       file: File,
@@ -207,7 +220,7 @@ export const api = {
 
         xhr.addEventListener("error", () => reject(new Error("Upload failed")));
 
-        xhr.open("POST", `${API_BASE}/api/files/upload?${params.toString()}`);
+        xhr.open("POST", `${getApiBase()}/api/files/upload?${params.toString()}`);
         xhr.send(formData);
       });
     },

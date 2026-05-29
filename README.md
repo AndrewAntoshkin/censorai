@@ -28,35 +28,25 @@ source .env  # или export REPLICATE_API_TOKEN=...
 python3 test_analyze.py /path/to/video.mp4
 ```
 
-## Продакшен (GitHub Pages + Render API)
+## Продакшен на Vercel (рекомендуется)
 
-| Компонент | Где | URL |
-|-----------|-----|-----|
-| Фронтенд | GitHub Pages | https://andrewantoshkin.github.io/censorai/ |
-| API (FastAPI + Replicate) | Render | https://censorai-api.onrender.com |
+Фронт + API на одном домене. Загрузка и Replicate работают после деплоя.
 
-Фронт ходит в API по `NEXT_PUBLIC_API_URL` (GitHub Secret). Загрузка видео и анализ через Replicate работают, когда API поднят.
+**Инструкция:** [scripts/vercel-setup.md](scripts/vercel-setup.md)
 
-### Один раз: задеплоить API на Render
+Кратко:
+1. https://vercel.com/new → Import `AndrewAntoshkin/censorai`
+2. Root Directory: **`frontend`**
+3. Env: `REPLICATE_API_TOKEN`, `REPLICATE_MODEL=google/gemini-3.5-flash`
+4. Deploy
 
-1. Откройте (или нажмите Deploy):  
-   **https://render.com/deploy?repo=https://github.com/AndrewAntoshkin/censorai**
-2. Войдите в Render (GitHub OAuth).
-3. В переменных окружения укажите **`REPLICATE_API_TOKEN`** (тот же, что в `backend/.env`).
-4. Дождитесь статуса **Live** (~5–10 мин).
+## GitHub Pages (только витрина)
 
-Проверка: https://censorai-api.onrender.com/api/health → `{"status":"ok",...}`
+| URL | Назначение |
+|-----|------------|
+| https://andrewantoshkin.github.io/censorai/ | Статическая демо-витрина |
 
-### Секреты GitHub (уже настроены скриптом)
-
-```bash
-./scripts/setup-production.sh   # из backend/.env → GitHub Secrets
-```
-
-- `REPLICATE_API_TOKEN` — для CI (опционально)
-- `NEXT_PUBLIC_API_URL` — `https://censorai-api.onrender.com`
-
-После деплоя API перезапустите workflow **Deploy demo to GitHub Pages** (Actions → Run workflow).
+Для живого API на Pages задайте `NEXT_PUBLIC_API_URL` в GitHub Secrets (например URL Vercel).
 
 ### Обновить встроенные демо-примеры на Pages
 

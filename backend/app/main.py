@@ -13,12 +13,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _migrate_sqlite_columns() -> None:
+    import sqlalchemy as sa
+    from app.core.config import settings
+
+    if "sqlite" not in settings.DATABASE_URL_SYNC:
+        return
+    sync_engine = sa.create_engine(settings.DATABASE_URL_SYNC)
+    with sync_engine.begin() as conn:
+        cols = {row[1] for row in conn.execute(sa.text("PRAGMA table_info(video_files)"))}
+        if "replicate_prediction_id" not in cols:
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE video_files ADD COLUMN replicate_prediction_id VARCHAR(128)"
+                )
+            )
+            logger.info("Added video_files.replicate_prediction_id column")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import app.models  # noqa: F401 — ensure all models are registered
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    _migrate_sqlite_columns()
     logger.info("Database tables created")
 
     yield

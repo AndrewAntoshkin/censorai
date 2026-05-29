@@ -17,8 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { riskLevelStyle } from "@/lib/risk";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { getApiBase } from "@/lib/api";
 
 const RISK_LABELS: Record<string, string> = {
   drugs: "Наркотики",

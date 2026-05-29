@@ -13,8 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { getApiBase } from "@/lib/api";
 
 interface UploadFile {
   file: File;
@@ -75,7 +74,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
 
     let projectId: string;
     try {
-      const res = await fetch(`${API_BASE}/api/projects`, {
+      const res = await fetch(`${getApiBase()}/api/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: `Проект ${new Date().toLocaleDateString("ru-RU")}` }),
@@ -97,7 +96,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
         formData.append("file", files[i].file);
 
         const uploadRes = await fetch(
-          `${API_BASE}/api/files/upload?project_id=${projectId}`,
+          `${getApiBase()}/api/files/upload?project_id=${projectId}`,
           { method: "POST", body: formData }
         );
 
@@ -121,14 +120,35 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
         let analyzeRes: Response;
         try {
           analyzeRes = await fetch(
-            `${API_BASE}/api/files/${uploadedFile.id}/analyze`,
+            `${getApiBase()}/api/files/${uploadedFile.id}/analyze`,
             { method: "POST" }
           );
         } finally {
           clearInterval(creep);
         }
 
-        if (!analyzeRes.ok) {
+        if (analyzeRes.status === 202) {
+          const deadline = Date.now() + 30 * 60 * 1000;
+          while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 5000));
+            const statusRes = await fetch(`${getApiBase()}/api/files/${uploadedFile.id}`);
+            if (!statusRes.ok) continue;
+            const fileState = await statusRes.json();
+            if (fileState.status === "analyzed") break;
+            if (fileState.status === "error") {
+              throw new Error("Analysis failed on server");
+            }
+            updateFile(i, {
+              status: "analyzing",
+              progress: Math.min(95, fileState.progress ?? 70),
+            });
+          }
+          const finalRes = await fetch(`${getApiBase()}/api/files/${uploadedFile.id}`);
+          const finalFile = await finalRes.json();
+          if (finalFile.status !== "analyzed") {
+            throw new Error("Analysis timed out");
+          }
+        } else if (!analyzeRes.ok) {
           const errBody = await analyzeRes.text();
           throw new Error(`Analysis failed: ${errBody}`);
         }
