@@ -231,7 +231,7 @@ export default function BooksPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const uploadRes = await fetch(`${API_BASE}/api/books/upload`, {
+      const uploadRes = await fetch(`${getApiBase()}/api/books/upload`, {
         method: "POST",
         body: formData,
       });
@@ -246,7 +246,7 @@ export default function BooksPage() {
       setStatus("analyzing");
 
       const analyzeRes = await fetch(
-        `${API_BASE}/api/books/${uploaded.id}/analyze`,
+        `${getApiBase()}/api/books/${uploaded.id}/analyze`,
         { method: "POST" }
       );
 
@@ -510,7 +510,7 @@ export default function BooksPage() {
                     size="lg"
                     onClick={() => {
                       window.open(
-                        `${API_BASE}/api/books/${bookId}/report`,
+                        `${getApiBase()}/api/books/${bookId}/report`,
                         "_blank"
                       );
                     }}

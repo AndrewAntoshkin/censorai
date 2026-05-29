@@ -36,7 +36,7 @@ python3 test_analyze.py /path/to/video.mp4
 
 Кратко:
 1. https://vercel.com/new → Import `AndrewAntoshkin/censorai`
-2. Root Directory: **`frontend`**
+2. **Root Directory:** корень репо (пусто), preset **Services**
 3. Env: `REPLICATE_API_TOKEN`, `REPLICATE_MODEL=google/gemini-3.5-flash`
 4. Deploy
 

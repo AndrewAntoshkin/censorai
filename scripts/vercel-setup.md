@@ -1,11 +1,10 @@
-# Деплой на Vercel
+# Деплой на Vercel (Services)
 
-## 1. Импорт проекта
+## 1. Import
 
-1. Откройте https://vercel.com/new
-2. **Import** репозитория `AndrewAntoshkin/censorai`
-3. **Root Directory:** `frontend`
-4. Framework: Next.js (определится автоматически)
+1. https://vercel.com/new → Import `AndrewAntoshkin/censorai`
+2. **Root Directory:** оставьте **пустым** (корень репозитория, не `frontend`)
+3. Framework Preset: **Services** (определится по `vercel.json`)
 
 ## 2. Переменные окружения
 
@@ -15,23 +14,18 @@
 | `REPLICATE_MODEL` | `google/gemini-3.5-flash` |
 | `VIDEO_PROVIDER` | `replicate` |
 
-`NEXT_PUBLIC_API_URL` **не нужен** — API на том же домене (`/api/...`).
-
 ## 3. Deploy
 
-Нажмите **Deploy**. Через 2–3 минуты сайт будет на `https://censorai-xxx.vercel.app`.
+После деплоя:
+- UI: `https://censorai.vercel.app/`
+- API: `https://censorai.vercel.app/api/health`
 
-## 4. Локальная разработка
+Фронт ходит на `/api/...` на том же домене — отдельный `NEXT_PUBLIC_API_URL` не нужен.
 
-```bash
-# Терминал 1 — API
-cd backend && uvicorn app.main:app --reload --port 8000
+## Структура
 
-# Терминал 2 — UI
-cd frontend && npm run dev
 ```
-
-## Примечание
-
-- GitHub Pages остаётся демо-витриной: https://andrewantoshkin.github.io/censorai/
-- Полная версия с загрузкой — на Vercel
+vercel.json          ← frontend (Next.js) + backend (FastAPI)
+frontend/            ← UI
+backend/             ← API + Replicate
+```

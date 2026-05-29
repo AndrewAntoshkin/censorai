@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "framework": "nextjs",
+      "routePrefix": "/"
+    },
+    "backend": {
+      "entrypoint": "backend",
+      "framework": "fastapi",
+      "routePrefix": "/api",
+      "maxDuration": 300
+    }
+  }
+}
