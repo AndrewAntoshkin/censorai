@@ -1,0 +1,35 @@
+# Env & secrets
+.env
+backend/.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Backend runtime data
+backend/uploads/
+backend/*.db
+backend/*.db*
+backend/*.bak*
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+*.raw_response.txt
+*.analysis.json
+
+# Claude local
+.claude/

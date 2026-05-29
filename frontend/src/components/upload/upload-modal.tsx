@@ -1,0 +1,290 @@
+"use client";
+
+import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useDropzone } from "react-dropzone";
+import { Upload, X, FileVideo, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+interface UploadFile {
+  file: File;
+  progress: number;
+  status: "pending" | "uploading" | "uploaded" | "analyzing" | "done" | "error";
+  error?: string;
+  fileId?: string;
+}
+
+interface UploadModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Готов к загрузке",
+  uploading: "Загрузка…",
+  uploaded: "Загружено, запуск анализа…",
+  analyzing: "Анализ через Gemini · обычно 1–3 мин",
+  done: "Анализ завершён",
+  error: "Ошибка",
+};
+
+export function UploadModal({ open, onOpenChange }: UploadModalProps) {
+  const [files, setFiles] = useState<UploadFile[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const router = useRouter();
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const newFiles: UploadFile[] = acceptedFiles.map((file) => ({
+      file,
+      progress: 0,
+      status: "pending" as const,
+    }));
+    setFiles((prev) => [...prev, ...newFiles]);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "video/*": [".mp4", ".avi", ".mkv", ".mov", ".wmv"],
+    },
+    maxSize: 500 * 1024 * 1024,
+  });
+
+  const updateFile = (index: number, updates: Partial<UploadFile>) => {
+    setFiles((prev) => prev.map((f, i) => (i === index ? { ...f, ...updates } : f)));
+  };
+
+  const uploadAndAnalyze = async () => {
+    setIsProcessing(true);
+
+    let projectId: string;
+    try {
+      const res = await fetch(`${API_BASE}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `Проект ${new Date().toLocaleDateString("ru-RU")}` }),
+      });
+      const project = await res.json();
+      projectId = project.id;
+    } catch {
+      setIsProcessing(false);
+      return;
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].status !== "pending") continue;
+
+      updateFile(i, { status: "uploading", progress: 10 });
+
+      try {
+        const formData = new FormData();
+        formData.append("file", files[i].file);
+
+        const uploadRes = await fetch(
+          `${API_BASE}/api/files/upload?project_id=${projectId}`,
+          { method: "POST", body: formData }
+        );
+
+        if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
+        const uploadedFile = await uploadRes.json();
+        updateFile(i, { status: "uploaded", progress: 50, fileId: uploadedFile.id });
+
+        updateFile(i, { status: "analyzing", progress: 60 });
+        // Creeping progress so the long analysis call doesn't look frozen.
+        const idx = i;
+        const creep = setInterval(() => {
+          setFiles((prev) =>
+            prev.map((f, j) =>
+              j === idx && f.status === "analyzing" && f.progress < 95
+                ? { ...f, progress: f.progress + 1 }
+                : f
+            )
+          );
+        }, 1500);
+
+        let analyzeRes: Response;
+        try {
+          analyzeRes = await fetch(
+            `${API_BASE}/api/files/${uploadedFile.id}/analyze`,
+            { method: "POST" }
+          );
+        } finally {
+          clearInterval(creep);
+        }
+
+        if (!analyzeRes.ok) {
+          const errBody = await analyzeRes.text();
+          throw new Error(`Analysis failed: ${errBody}`);
+        }
+
+        updateFile(i, { status: "done", progress: 100 });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        updateFile(i, { status: "error", error: message });
+      }
+    }
+    setIsProcessing(false);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleClose = (isOpen: boolean) => {
+    if (isProcessing) return;
+    if (!isOpen) {
+      setFiles([]);
+    }
+    onOpenChange(isOpen);
+  };
+
+  const doneFile = files.find((f) => f.status === "done" && f.fileId);
+  const canViewResult = !!doneFile;
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Загрузка файлов</DialogTitle>
+        </DialogHeader>
+
+        <div
+          {...getRootProps()}
+          className={cn(
+            "cursor-pointer rounded-xl border border-dashed p-8 text-center transition-colors",
+            isDragActive
+              ? "border-primary bg-primary/[0.06]"
+              : "border-border hover:border-primary/40 hover:bg-accent",
+            isProcessing && "pointer-events-none opacity-50"
+          )}
+        >
+          <input {...getInputProps()} disabled={isProcessing} />
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+              <Upload className="h-5 w-5 text-primary" />
+            </div>
+            {isDragActive ? (
+              <p className="text-sm font-medium text-primary">
+                Отпустите файлы для загрузки
+              </p>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-foreground">
+                  Перетащите файлы или нажмите для выбора
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  MP4, AVI, MKV, MOV, WMV до 500 МБ
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {files.length > 0 && (
+          <div className="mt-4 space-y-3 max-h-60 overflow-y-auto">
+            {files.map((uploadFile, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+              >
+                <FileVideo className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {uploadFile.file.name}
+                    </p>
+                    <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                      {formatFileSize(uploadFile.file.size)}
+                    </span>
+                  </div>
+                  {(uploadFile.status === "uploading" || uploadFile.status === "analyzing") && (
+                    <div className="space-y-1">
+                      <Progress value={uploadFile.progress} className="h-1.5" />
+                      <div className="flex items-center gap-1.5 text-xs text-primary">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {STATUS_LABELS[uploadFile.status]}
+                      </div>
+                    </div>
+                  )}
+                  {uploadFile.status === "uploaded" && (
+                    <div className="flex items-center gap-1.5 text-xs text-primary">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      {STATUS_LABELS[uploadFile.status]}
+                    </div>
+                  )}
+                  {uploadFile.status === "done" && (
+                    <div className="flex items-center gap-1 text-xs text-success">
+                      <CheckCircle className="h-3 w-3" />
+                      {STATUS_LABELS[uploadFile.status]}
+                    </div>
+                  )}
+                  {uploadFile.status === "error" && (
+                    <div className="flex items-center gap-1 text-xs text-critical">
+                      <AlertCircle className="h-3 w-3" />
+                      {uploadFile.error || STATUS_LABELS[uploadFile.status]}
+                    </div>
+                  )}
+                </div>
+                {uploadFile.status === "pending" && !isProcessing && (
+                  <button
+                    onClick={() => removeFile(index)}
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-4">
+          {canViewResult && (
+            <Button
+              onClick={() => {
+                if (doneFile?.fileId) {
+                  router.push(`/file/${doneFile.fileId}`);
+                  handleClose(false);
+                }
+              }}
+            >
+              Посмотреть результат
+            </Button>
+          )}
+          {files.length > 0 && files.some((f) => f.status === "pending") && (
+            <Button
+              onClick={uploadAndAnalyze}
+              size="lg"
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Обработка...
+                </>
+              ) : (
+                `Загрузить и анализировать (${files.filter((f) => f.status === "pending").length})`
+              )}
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
