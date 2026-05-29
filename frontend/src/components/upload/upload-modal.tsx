@@ -103,17 +103,59 @@ async function uploadFileToProject(
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload(file)) {
     const { upload } = await import("@vercel/blob/client");
-    onProgress(5, "Подключение к хранилищу…");
-    const blob = await upload(file.name, file, {
-      access: "public",
-      handleUploadUrl: "/upload/blob",
-      multipart: file.size > 20 * 1024 * 1024,
-      onUploadProgress: ({ percentage }) =>
+    const uploadUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/upload/blob`
+        : "/upload/blob";
+
+    onProgress(8, "Подключение к хранилищу…");
+
+    const startedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const sec = Math.round((Date.now() - startedAt) / 1000);
+      if (sec >= 4) {
         onProgress(
-          Math.max(5, Math.round(percentage * 0.85)),
-          `Загрузка в облако… ${Math.round(percentage)}%`
-        ),
-    });
+          Math.min(84, 8 + sec),
+          `Загрузка ${formatFileSize(file.size)} в облако… ${sec} сек`
+        );
+      }
+    }, 2000);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15 * 60 * 1000);
+
+    let blob: { url: string };
+    try {
+      blob = await upload(file.name, file, {
+        access: "public",
+        contentType: file.type || "video/mp4",
+        handleUploadUrl: uploadUrl,
+        // Multipart adds extra round-trips; keep simple upload up to 100 MB.
+        multipart: file.size > 100 * 1024 * 1024,
+        abortSignal: controller.signal,
+        onUploadProgress: ({ percentage }) =>
+          onProgress(
+            Math.max(8, Math.round(percentage * 0.85)),
+            `Загрузка в облако… ${Math.round(percentage)}%`
+          ),
+      });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          "Загрузка заняла слишком много времени. Проверьте интернет и попробуйте снова."
+        );
+      }
+      const message = err instanceof Error ? err.message : "Upload failed";
+      if (/blob|token|storage/i.test(message)) {
+        throw new Error(
+          "Не удалось подключиться к Vercel Blob. В настройках проекта нужен BLOB_READ_WRITE_TOKEN."
+        );
+      }
+      throw err instanceof Error ? err : new Error(message);
+    } finally {
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+    }
 
     onProgress(90, "Регистрация файла…");
     const res = await fetch(
