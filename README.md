@@ -28,43 +28,42 @@ source .env  # или export REPLICATE_API_TOKEN=...
 python3 test_analyze.py /path/to/video.mp4
 ```
 
-## Демо на GitHub Pages
+## Продакшен (GitHub Pages + Render API)
 
-Статическая сборка с 5 готовыми примерами анализа (без загрузки новых видео).
+| Компонент | Где | URL |
+|-----------|-----|-----|
+| Фронтенд | GitHub Pages | https://andrewantoshkin.github.io/censorai/ |
+| API (FastAPI + Replicate) | Render | https://censorai-api.onrender.com |
 
-1. Создайте репозиторий на GitHub и запушьте код:
+Фронт ходит в API по `NEXT_PUBLIC_API_URL` (GitHub Secret). Загрузка видео и анализ через Replicate работают, когда API поднят.
 
-```bash
-git init
-git add .
-git commit -m "Initial commit with GitHub Pages demo"
-git branch -M main
-git remote add origin https://github.com/YOUR_USER/censorai.git
-git push -u origin main
-```
+### Один раз: задеплоить API на Render
 
-2. В репозитории: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+1. Откройте (или нажмите Deploy):  
+   **https://render.com/deploy?repo=https://github.com/AndrewAntoshkin/censorai**
+2. Войдите в Render (GitHub OAuth).
+3. В переменных окружения укажите **`REPLICATE_API_TOKEN`** (тот же, что в `backend/.env`).
+4. Дождитесь статуса **Live** (~5–10 мин).
 
-3. После успешного workflow демо будет по адресу:
+Проверка: https://censorai-api.onrender.com/api/health → `{"status":"ok",...}`
 
-`https://YOUR_USER.github.io/censorai/`
-
-### Обновить демо-данные
-
-После новых анализов в локальной БД:
+### Секреты GitHub (уже настроены скриптом)
 
 ```bash
-cd backend
-python3 seed_demo.py
-python3 export_demo_static.py
-git add frontend/public/demo/
-git commit -m "Update demo bundle"
-git push
+./scripts/setup-production.sh   # из backend/.env → GitHub Secrets
 ```
 
-### Полный режим (с API)
+- `REPLICATE_API_TOKEN` — для CI (опционально)
+- `NEXT_PUBLIC_API_URL` — `https://censorai-api.onrender.com`
 
-Если бэкенд задеплоен отдельно (Render, Fly.io и т.д.), в workflow можно убрать `NEXT_PUBLIC_DEMO_MODE` и задать `NEXT_PUBLIC_API_URL` как GitHub secret.
+После деплоя API перезапустите workflow **Deploy demo to GitHub Pages** (Actions → Run workflow).
+
+### Обновить встроенные демо-примеры на Pages
+
+```bash
+cd backend && python3 seed_demo.py && python3 export_demo_static.py
+git add frontend/public/demo/ && git commit -m "Update demo bundle" && git push
+```
 
 ## Структура
 
