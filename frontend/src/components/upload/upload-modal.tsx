@@ -96,8 +96,16 @@ async function waitForAnalysis(
   }
 }
 
-const BLOB_MULTIPART_THRESHOLD = 8 * 1024 * 1024;
+const BLOB_MULTIPART_THRESHOLD = 4 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
+function useBlobMultipart(file: File): boolean {
+  if (typeof window === "undefined") return file.size >= BLOB_MULTIPART_THRESHOLD;
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  // Simple PUT often stalls in browsers; always chunk on Vercel/production.
+  return !isLocal || file.size >= BLOB_MULTIPART_THRESHOLD;
+}
 
 async function uploadViaBlob(
   file: File,
@@ -105,7 +113,7 @@ async function uploadViaBlob(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<{ url: string }> {
   const { upload } = await import("@vercel/blob/client");
-  const useMultipart = file.size >= BLOB_MULTIPART_THRESHOLD;
+  const useMultipart = useBlobMultipart(file);
 
   onProgress(5, useMultipart ? "Подготовка частей…" : "Подключение к хранилищу…");
 
