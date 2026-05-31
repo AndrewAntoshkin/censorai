@@ -2,6 +2,16 @@ import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.db_url import resolve_database_env
+
+resolve_database_env()
+
+if os.getenv("VERCEL"):
+    os.environ.setdefault("UPLOAD_DIR", "/tmp/uploads")
+    if not os.getenv("DATABASE_URL"):
+        os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:////tmp/censorai.db")
+        os.environ.setdefault("DATABASE_URL_SYNC", "sqlite:////tmp/censorai.db")
+
 
 def _default_api_prefix() -> str:
     if os.getenv("API_PREFIX") is not None:
