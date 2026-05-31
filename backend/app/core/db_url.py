@@ -33,9 +33,12 @@ def resolve_database_env() -> None:
     raw = (
         os.getenv("DATABASE_URL")
         or os.getenv("POSTGRES_URL")
-        or os.getenv("POSTGRES_URL_NON_POOLING")
-        or os.getenv("POSTGRES_PRISMA_URL")
         or os.getenv("STORAGE_URL")
+        or os.getenv("POSTGRES_PRISMA_URL")
+        or os.getenv("STORAGE_PRISMA_URL")
+        or os.getenv("POSTGRES_URL_NON_POOLING")
+        or os.getenv("STORAGE_URL_NON_POOLING")
+        or os.getenv("DATABASE_URL_UNPOOLED")
         or ""
     ).strip()
     if not raw:

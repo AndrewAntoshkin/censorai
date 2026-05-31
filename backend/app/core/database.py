@@ -5,11 +5,18 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-connect_args = {}
+connect_args: dict = {}
 if "sqlite" in settings.DATABASE_URL:
     connect_args = {"check_same_thread": False}
+elif "postgres" in settings.DATABASE_URL:
+    connect_args = {"ssl": "require"}
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False, connect_args=connect_args)
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    connect_args=connect_args,
+    pool_pre_ping=True,
+)
 async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 

@@ -18,7 +18,14 @@ def _migrate_columns() -> None:
     import sqlalchemy as sa
     from app.core.config import settings
 
-    sync_engine = sa.create_engine(settings.DATABASE_URL_SYNC)
+    sync_connect_args: dict = {}
+    if "postgres" in settings.DATABASE_URL_SYNC:
+        sync_connect_args = {"sslmode": "require"}
+
+    sync_engine = sa.create_engine(
+        settings.DATABASE_URL_SYNC,
+        connect_args=sync_connect_args,
+    )
     is_sqlite = "sqlite" in settings.DATABASE_URL_SYNC
 
     with sync_engine.begin() as conn:
@@ -115,6 +122,8 @@ app.include_router(books_router)
 
 @app.get(settings.route_prefix("/health"))
 async def health_check():
+    import os
+
     from app.core.db_url import is_ephemeral_sqlite
 
     db = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
@@ -123,6 +132,11 @@ async def health_check():
         "service": "framecheck",
         "database": db,
         "ephemeral_db": is_ephemeral_sqlite(),
+        "env": {
+            "has_database_url": bool(os.getenv("DATABASE_URL")),
+            "has_postgres_url": bool(os.getenv("POSTGRES_URL")),
+            "has_storage_url": bool(os.getenv("STORAGE_URL")),
+        },
     }
 
 
