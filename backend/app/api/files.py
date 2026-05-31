@@ -141,7 +141,7 @@ async def register_from_blob(
     db: AsyncSession = Depends(get_db),
 ):
     size_mb = data.size / (1024 * 1024)
-    if size_mb > settings.INLINE_VIDEO_MAX_MB:
+    if size_mb > settings.UPLOAD_MAX_SIZE_MB:
         raise HTTPException(
             status_code=413,
             detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
