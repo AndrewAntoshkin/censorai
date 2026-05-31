@@ -39,6 +39,10 @@ RISK_LABELS = {
     "propaganda": "Пропаганда",
     "crime_glorification": "Героизация преступлений",
     "excessive_cruelty": "Чрезмерная жестокость",
+    "lgbt_propaganda": "Пропаганда ЛГБТ",
+    "suicide": "Суицид",
+    "foreign_agent": "Иноагент (проверка)",
+    "pedophilia": "Педофилия",
 }
 
 LEVEL_LABELS = {

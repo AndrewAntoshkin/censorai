@@ -30,6 +30,8 @@ frontend/out/
 # Test artifacts
 *.raw_response.txt
 *.analysis.json
+backend/eval/clips/*.mp4
+backend/eval/*.log
 
 # Claude local
 .claude/

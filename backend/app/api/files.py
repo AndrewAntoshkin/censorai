@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import mimetypes
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -29,11 +31,47 @@ from app.services.chunk_upload_service import (
 )
 from app.services.docx_service import generate_report
 from app.services.gemini_service import gemini_service
+from app.services.replicate_media import verify_replicate_media_signature
 from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=settings.route_prefix("/files"), tags=["files"])
+
+
+async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
+    """Start Replicate job. Must run on the same instance that holds the file (Vercel /tmp)."""
+    if not video.storage_path:
+        raise HTTPException(status_code=400, detail="File has no storage path")
+
+    path = Path(video.storage_path)
+    if not video.storage_path.startswith(("http://", "https://")) and not path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="Video file not found on server. Retry upload on Vercel or use persistent storage.",
+        )
+
+    video.status = "analyzing"
+    video.progress = 10
+    await db.flush()
+
+    try:
+        prediction_id = await asyncio.to_thread(
+            gemini_service.start_analysis,
+            video.storage_path,
+            file_id=video.id,
+            file_size=video.size,
+        )
+    except Exception as exc:
+        logger.exception("Failed to start analysis for file %s", video.id)
+        video.status = "error"
+        video.replicate_prediction_id = None
+        await db.flush()
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+
+    video.replicate_prediction_id = prediction_id
+    video.progress = 30
+    await db.flush()
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
@@ -49,19 +87,31 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
         if (
             ("interrupted" in err or "code: pa" in err)
             and video.storage_path
-            and video.progress < 40
+            and video.progress < 90
         ):
-            logger.warning("Replicate interrupted, retrying analysis for file %s", video.id)
-            try:
-                prediction_id = await asyncio.to_thread(
-                    gemini_service.start_analysis, video.storage_path
+            path_ok = video.storage_path.startswith(("http://", "https://")) or Path(
+                video.storage_path
+            ).exists()
+            if not path_ok:
+                logger.error(
+                    "Replicate PA but video file missing on this instance for %s",
+                    video.id,
                 )
-                video.replicate_prediction_id = prediction_id
-                video.progress = 40
-                await db.flush()
-                return
-            except Exception:
-                logger.exception("Retry failed for file %s", video.id)
+            else:
+                logger.warning("Replicate interrupted, retrying analysis for file %s", video.id)
+                try:
+                    prediction_id = await asyncio.to_thread(
+                        gemini_service.start_analysis,
+                        video.storage_path,
+                        file_id=video.id,
+                        file_size=video.size,
+                    )
+                    video.replicate_prediction_id = prediction_id
+                    video.progress = min(video.progress + 10, 85)
+                    await db.flush()
+                    return
+                except Exception:
+                    logger.exception("Retry failed for file %s", video.id)
 
         logger.exception("Poll failed for file %s", video.id)
         video.status = "error"
@@ -111,6 +161,7 @@ async def _save_analysis_result(
                 end_time=gs.end_time,
                 description=gs.description,
                 risk=risk_item.risk,
+                mode=risk_item.mode,
                 risk_level=risk_item.risk_level,
                 probability=risk_item.probability,
                 reason=risk_item.reason,
@@ -132,6 +183,7 @@ async def upload_file(
     project_id: str,
     file: UploadFile,
     folder_id: str | None = None,
+    auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     if not file.filename:
@@ -159,6 +211,11 @@ async def upload_file(
     db.add(video)
     await db.flush()
     await db.refresh(video)
+
+    if auto_analyze:
+        await _kickoff_analysis(video, db)
+        await db.refresh(video)
+
     return video
 
 
@@ -205,13 +262,13 @@ async def upload_chunk(session_id: str, part: int, request: Request):
 @router.post("/upload-chunks/{session_id}/complete", response_model=VideoFileResponse, status_code=201)
 async def complete_chunk_upload(
     session_id: str,
+    auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         merged_path, session = merge_session(session_id)
-        content = merged_path.read_bytes()
-        storage_path = await storage_service.save_upload(
-            session.project_id, session.filename, content
+        storage_path = await storage_service.save_upload_from_path(
+            session.project_id, session.filename, merged_path
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -232,6 +289,11 @@ async def complete_chunk_upload(
     db.add(video)
     await db.flush()
     await db.refresh(video)
+
+    if auto_analyze:
+        await _kickoff_analysis(video, db)
+        await db.refresh(video)
+
     return video
 
 
@@ -363,23 +425,51 @@ async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
     await db.flush()
 
     try:
-        prediction_id = await asyncio.to_thread(
-            gemini_service.start_analysis, video.storage_path
-        )
+        await _kickoff_analysis(video, db)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to start analysis for file %s", file_id)
         video.status = "error"
         await db.flush()
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}") from e
 
-    video.replicate_prediction_id = prediction_id
-    video.progress = 30
-    await db.flush()
     await db.commit()
 
     return JSONResponse(
         status_code=202,
         content={"status": "analyzing", "file_id": file_id},
+    )
+
+
+@router.get("/{file_id}/replicate-media")
+async def replicate_media(
+    file_id: str,
+    expires: int = Query(...),
+    sig: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temporary signed URL for Replicate to fetch large videos (no session auth)."""
+    if not verify_replicate_media_signature(file_id, expires, sig):
+        raise HTTPException(status_code=403, detail="Invalid or expired signature")
+
+    result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+    video = result.scalar_one_or_none()
+    if not video or not video.storage_path:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if video.storage_path.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Remote storage path cannot be streamed")
+
+    path = Path(video.storage_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+
+    media_type = mimetypes.guess_type(path.name)[0] or "video/mp4"
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=video.name,
     )
 
 
@@ -433,10 +523,27 @@ def _build_summary_dict(gemini_result) -> dict:
             elif r.risk_level == "warning":
                 warning += 1
 
-    return {
+    summary: dict = {
         "total_scenes": total_reviewed,
         "risky_scenes": len(risky_scene_numbers),
         "risk_categories": categories,
         "critical_count": critical,
         "warning_count": warning,
     }
+
+    if gemini_result.recommended_age_rating:
+        summary["recommended_age_rating"] = gemini_result.recommended_age_rating
+    if gemini_result.age_rating_reason:
+        summary["age_rating_reason"] = gemini_result.age_rating_reason
+    if gemini_result.age_rating_triggers:
+        summary["age_rating_triggers"] = [
+            t.model_dump(exclude_none=True) for t in gemini_result.age_rating_triggers
+        ]
+    if gemini_result.entities:
+        summary["entities"] = [e.model_dump(exclude_none=True) for e in gemini_result.entities]
+    if gemini_result.markings_detected:
+        summary["markings_detected"] = [
+            m.model_dump(exclude_none=True) for m in gemini_result.markings_detected
+        ]
+
+    return summary

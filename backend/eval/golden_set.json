@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "description": "Golden-set для замера precision/recall. Полные серии (~50–70 МБ) — долгий прогон через Replicate.",
+  "cases": [
+    {
+      "id": "age-rating-alcohol-16plus",
+      "description": "Сцены употребления алкоголя — «Кухня» (ресторанная комедия)",
+      "source": "Дела — неверная возрастная маркировка",
+      "video_path": "eval/clips/kuhnya-s01e01-2min.mp4",
+      "expect": {
+        "recommended_age_rating_min": "16+",
+        "required_risks": ["alcohol"],
+        "forbidden_risks": [],
+        "min_age_rating_triggers": 1
+      }
+    },
+    {
+      "id": "age-rating-profanity-16plus",
+      "description": "Ненормативная лексика — «Трудные подростки»",
+      "source": "Дела — неверная возрастная маркировка",
+      "video_path": "eval/clips/trudnye-podrostki-s02e01-2min.mp4",
+      "expect": {
+        "recommended_age_rating_min": "16+",
+        "required_risks": ["profanity"],
+        "forbidden_risks": [],
+        "min_age_rating_triggers": 1
+      }
+    },
+    {
+      "id": "violence-content",
+      "description": "Насилие/криминал — «Убойная сила»",
+      "source": "436-ФЗ / общий контент-риск",
+      "video_path": "eval/clips/uboinaya-sila-part1-2min.mp4",
+      "expect": {
+        "recommended_age_rating_min": "16+",
+        "required_risks": ["violence"],
+        "forbidden_risks": [],
+        "min_age_rating_triggers": 1
+      }
+    },
+    {
+      "id": "lgbt-propagation-ivi",
+      "description": "Пропаганда нетрадиционных отношений — кейс IVI/Кинопоиск",
+      "source": "Дела — КоАП 6.21",
+      "video_path": null,
+      "notes": "Нужен отдельный клип под КоАП 6.21",
+      "expect": {
+        "required_risks": ["lgbt_propaganda"],
+        "forbidden_risks": [],
+        "min_age_rating_triggers": 0
+      }
+    },
+    {
+      "id": "foreign-agent-mention",
+      "description": "Упоминание лица/организации без маркировки иноагента",
+      "source": "255-ФЗ",
+      "video_path": null,
+      "notes": "Нужен клип с упоминанием публичной фигуры/НКО без плашки",
+      "expect": {
+        "required_risks": ["foreign_agent"],
+        "forbidden_risks": [],
+        "min_entities": 1,
+        "min_age_rating_triggers": 0
+      }
+    },
+    {
+      "id": "suicide-content",
+      "description": "Сцены/упоминания суицида или самоповреждения",
+      "source": "436-ФЗ",
+      "video_path": null,
+      "notes": "Нужен отдельный клип",
+      "expect": {
+        "required_risks": ["suicide"],
+        "forbidden_risks": [],
+        "min_age_rating_triggers": 0
+      }
+    },
+    {
+      "id": "clean-disclaimer-only",
+      "description": "Negative control — короткий безобидный клип",
+      "source": "negative control",
+      "video_path": "eval/clips/clean-disclaimer-only.mp4",
+      "expect": {
+        "required_risks": [],
+        "forbidden_risks": [],
+        "max_critical_count": 0,
+        "min_age_rating_triggers": 0
+      }
+    }
+  ]
+}

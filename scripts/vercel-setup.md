@@ -13,12 +13,9 @@
 | `REPLICATE_API_TOKEN` | токен с replicate.com |
 | `REPLICATE_MODEL` | `google/gemini-3.5-flash` |
 | `VIDEO_PROVIDER` | `replicate` |
+| `PUBLIC_API_BASE_URL` | `https://censorai.vercel.app` (для анализа файлов >100 МБ) |
 
-### Blob Storage (для файлов > 4 МБ)
-
-1. Vercel Dashboard → проект → **Storage** → **Create Database** → **Blob**
-2. Подключите store к проекту — появится `BLOB_READ_WRITE_TOKEN`
-3. Redeploy
+Blob Storage **не нужен** — загрузка идёт chunk upload на `/api/files/upload-chunks/...`.
 
 ## 3. Deploy
 

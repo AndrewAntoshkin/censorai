@@ -94,6 +94,33 @@ export interface AnalysisSummaryAPI {
   risk_categories: Record<string, number>;
   critical_count: number;
   warning_count: number;
+  recommended_age_rating?: string | null;
+  age_rating_reason?: string | null;
+  age_rating_triggers?: AgeRatingTriggerAPI[];
+  entities?: EntityAPI[];
+  markings_detected?: MarkingAPI[];
+}
+
+export interface AgeRatingTriggerAPI {
+  scene_number?: number;
+  start_time?: string;
+  end_time?: string;
+  trigger?: string;
+  reason?: string;
+}
+
+export interface EntityAPI {
+  type?: string;
+  name?: string;
+  scene_number?: number;
+  context?: string;
+}
+
+export interface MarkingAPI {
+  type?: string;
+  text?: string;
+  scene_number?: number;
+  start_time?: string;
 }
 
 export interface AnalysisBriefAPI {
@@ -141,6 +168,7 @@ export interface SceneAPI {
   end_time: string | null;
   description: string | null;
   risk: string | null;
+  mode: string | null;
   risk_level: string | null;
   probability: number | null;
   reason: string | null;

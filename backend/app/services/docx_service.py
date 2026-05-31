@@ -25,6 +25,10 @@ RISK_LABELS: dict[str, str] = {
     "propaganda": "Пропаганда",
     "crime_glorification": "Героизация преступлений",
     "excessive_cruelty": "Чрезмерная жестокость",
+    "lgbt_propaganda": "Пропаганда ЛГБТ",
+    "suicide": "Суицид",
+    "foreign_agent": "Иноагент (проверка)",
+    "pedophilia": "Педофилия",
 }
 
 RISK_LEVEL_LABELS: dict[str, str] = {

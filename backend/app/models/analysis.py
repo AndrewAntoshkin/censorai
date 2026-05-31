@@ -51,6 +51,7 @@ class Scene(Base):
     end_time: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    mode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     risk_level: Mapped[str | None] = mapped_column(String(20), nullable=True)
     probability: Mapped[float | None] = mapped_column(Float, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)

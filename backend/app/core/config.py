@@ -9,6 +9,16 @@ def _default_api_prefix() -> str:
     return "" if os.getenv("VERCEL") else "/api"
 
 
+def _default_public_api_base() -> str:
+    explicit = os.getenv("PUBLIC_API_BASE_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    vercel_url = os.getenv("VERCEL_URL", "").strip()
+    if vercel_url:
+        return f"https://{vercel_url}".rstrip("/")
+    return "http://localhost:8000"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -37,7 +47,14 @@ class Settings(BaseSettings):
 
     GEMINI_MAX_CONCURRENT: int = 3
 
-    INLINE_VIDEO_MAX_MB: int = 40
+    INLINE_VIDEO_MAX_MB: int = 100
+    REPLICATE_MEDIA_TTL_SECONDS: int = 7200
+    PUBLIC_API_BASE_URL: str = _default_public_api_base()
+    REPLICATE_MAX_VIDEO_MINUTES: int = 45
+
+    REPLICATE_VIDEO_FPS: float = 1
+    REPLICATE_MAX_OUTPUT_TOKENS: int = 32768
+    REPLICATE_THINKING_LEVEL: str = "low"
 
     HTTPS_PROXY_URL: str = ""
 
@@ -50,6 +67,10 @@ class Settings(BaseSettings):
         if not self.API_PREFIX:
             return segment
         return f"{self.API_PREFIX.rstrip('/')}{segment}"
+
+    @property
+    def public_api_base_url(self) -> str:
+        return self.PUBLIC_API_BASE_URL.rstrip("/")
 
 
 settings = Settings()

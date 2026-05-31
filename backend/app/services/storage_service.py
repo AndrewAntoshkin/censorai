@@ -1,4 +1,3 @@
-import os
 import shutil
 import uuid
 from pathlib import Path
@@ -24,6 +23,16 @@ class StorageService:
         file_path = project_dir / storage_filename
         file_path.write_bytes(content)
         return str(file_path)
+
+    async def save_upload_from_path(
+        self, project_id: str, filename: str, source_path: Path
+    ) -> str:
+        project_dir = self.get_project_dir(project_id)
+        file_id = uuid.uuid4()
+        ext = Path(filename).suffix
+        dest = project_dir / f"{file_id}{ext}"
+        shutil.copyfile(source_path, dest)
+        return str(dest)
 
     def get_file_path(self, storage_path: str) -> Path:
         return Path(storage_path)

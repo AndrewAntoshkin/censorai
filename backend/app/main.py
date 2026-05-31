@@ -14,22 +14,43 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _migrate_sqlite_columns() -> None:
+def _migrate_columns() -> None:
     import sqlalchemy as sa
     from app.core.config import settings
 
-    if "sqlite" not in settings.DATABASE_URL_SYNC:
-        return
     sync_engine = sa.create_engine(settings.DATABASE_URL_SYNC)
+    is_sqlite = "sqlite" in settings.DATABASE_URL_SYNC
+
     with sync_engine.begin() as conn:
-        cols = {row[1] for row in conn.execute(sa.text("PRAGMA table_info(video_files)"))}
-        if "replicate_prediction_id" not in cols:
+        if is_sqlite:
+            video_cols = {
+                row[1] for row in conn.execute(sa.text("PRAGMA table_info(video_files)"))
+            }
+            if "replicate_prediction_id" not in video_cols:
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE video_files ADD COLUMN replicate_prediction_id VARCHAR(128)"
+                    )
+                )
+                logger.info("Added video_files.replicate_prediction_id column")
+
+            scene_cols = {
+                row[1] for row in conn.execute(sa.text("PRAGMA table_info(scenes)"))
+            }
+            if "mode" not in scene_cols:
+                conn.execute(sa.text("ALTER TABLE scenes ADD COLUMN mode VARCHAR(50)"))
+                logger.info("Added scenes.mode column")
+        else:
             conn.execute(
                 sa.text(
-                    "ALTER TABLE video_files ADD COLUMN replicate_prediction_id VARCHAR(128)"
+                    "ALTER TABLE video_files ADD COLUMN IF NOT EXISTS "
+                    "replicate_prediction_id VARCHAR(128)"
                 )
             )
-            logger.info("Added video_files.replicate_prediction_id column")
+            conn.execute(
+                sa.text("ALTER TABLE scenes ADD COLUMN IF NOT EXISTS mode VARCHAR(50)")
+            )
+            logger.info("Ensured video_files.replicate_prediction_id and scenes.mode columns")
 
 
 @asynccontextmanager
@@ -40,7 +61,7 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    _migrate_sqlite_columns()
+    _migrate_columns()
 
     await asyncio.to_thread(_seed_demo_if_needed)
     logger.info("Database tables created")

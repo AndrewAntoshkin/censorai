@@ -54,43 +54,43 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Готов к загрузке",
   uploading: "Загрузка…",
   uploaded: "Загружено, запуск анализа…",
-  analyzing: "Анализ через Gemini · обычно 1–3 мин",
+  analyzing: "Анализ через Gemini · 5–20 мин для длинных видео",
   done: "Анализ завершён",
   error: "Ошибка",
 };
 
 async function waitForAnalysis(
   fileId: string,
-  onProgress: (progress: number) => void
+  onProgress: (progress: number) => void,
+  options?: { alreadyStarted?: boolean }
 ): Promise<void> {
-  const analyzeRes = await fetch(`${getApiBase()}/api/files/${fileId}/analyze`, {
-    method: "POST",
-  });
+  if (!options?.alreadyStarted) {
+    const analyzeRes = await fetch(`${getApiBase()}/api/files/${fileId}/analyze`, {
+      method: "POST",
+    });
 
-  if (analyzeRes.status === 202) {
-    const deadline = Date.now() + 30 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
-      if (!statusRes.ok) continue;
-      const fileState = await statusRes.json();
-      if (fileState.status === "analyzed") return;
-      if (fileState.status === "error") {
-        throw new Error("Analysis failed on server");
-      }
-      onProgress(Math.min(95, fileState.progress ?? 70));
+    if (!analyzeRes.ok && analyzeRes.status !== 202) {
+      const errBody = await analyzeRes.text();
+      throw new Error(`Analysis failed: ${errBody}`);
     }
-    const finalRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
-    const finalFile = await finalRes.json();
-    if (finalFile.status !== "analyzed") {
-      throw new Error("Analysis timed out");
-    }
-    return;
   }
 
-  if (!analyzeRes.ok) {
-    const errBody = await analyzeRes.text();
-    throw new Error(`Analysis failed: ${errBody}`);
+  const deadline = Date.now() + 60 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+    if (!statusRes.ok) continue;
+    const fileState = await statusRes.json();
+    if (fileState.status === "analyzed") return;
+    if (fileState.status === "error") {
+      throw new Error("Analysis failed on server");
+    }
+    onProgress(Math.min(95, fileState.progress ?? 70));
+  }
+  const finalRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+  const finalFile = await finalRes.json();
+  if (finalFile.status !== "analyzed") {
+    throw new Error("Analysis timed out");
   }
 }
 
@@ -147,7 +147,7 @@ async function uploadViaChunks(
 
   onProgress(90, "Сборка файла…");
   const completeRes = await fetch(
-    `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete`,
+    `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
     { method: "POST" }
   );
   if (!completeRes.ok) {
@@ -171,7 +171,7 @@ async function uploadFileToProject(
   const formData = new FormData();
   formData.append("file", file);
   const uploadRes = await fetch(
-    `${getApiBase()}/api/files/upload?project_id=${encodeURIComponent(projectId)}`,
+    `${getApiBase()}/api/files/upload?project_id=${encodeURIComponent(projectId)}&auto_analyze=1`,
     { method: "POST", body: formData }
   );
   if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
@@ -234,13 +234,18 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
           (progress, hint) => updateFile(i, { progress, statusHint: hint })
         );
         updateFile(i, {
-          status: "uploaded",
-          progress: 100,
+          status: uploadedFile.status === "analyzing" ? "analyzing" : "uploaded",
+          progress: uploadedFile.status === "analyzing" ? 30 : 100,
           fileId: uploadedFile.id,
-          statusHint: "Запуск анализа…",
+          statusHint:
+            uploadedFile.status === "analyzing"
+              ? "Анализ запущен…"
+              : "Запуск анализа…",
         });
 
-        updateFile(i, { status: "analyzing", progress: 10, statusHint: "Отправка в Replicate…" });
+        if (uploadedFile.status !== "analyzing") {
+          updateFile(i, { status: "analyzing", progress: 10, statusHint: "Отправка в Replicate…" });
+        }
         const idx = i;
         const creep = setInterval(() => {
           setFiles((prev) =>
@@ -253,12 +258,15 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
         }, 1500);
 
         try {
-          await waitForAnalysis(uploadedFile.id, (progress) =>
-            updateFile(i, {
-              status: "analyzing",
-              progress,
-              statusHint: "Анализ видео · обычно 1–3 мин",
-            })
+          await waitForAnalysis(
+            uploadedFile.id,
+            (progress) =>
+              updateFile(i, {
+                status: "analyzing",
+                progress,
+                statusHint: "Анализ видео · 5–20 мин для длинных роликов",
+              }),
+            { alreadyStarted: uploadedFile.status === "analyzing" }
           );
         } finally {
           clearInterval(creep);

@@ -10,12 +10,21 @@ import httpx
 import replicate
 
 from app.core.config import settings
-from app.schemas.analysis import GeminiAnalysisResult
 from app.services.analysis_prompts import VIDEO_ANALYSIS_PROMPT
+from app.services.replicate_media import build_replicate_media_url
+from app.schemas.analysis import GeminiAnalysisResult
 
 logger = logging.getLogger(__name__)
 
 ANALYSIS_PROMPT = VIDEO_ANALYSIS_PROMPT
+
+
+def _is_transient_replicate_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in ("interrupted", "code: pa", "timeout", "temporarily unavailable", "rate limit")
+    )
 
 
 class GeminiService:
@@ -26,13 +35,30 @@ class GeminiService:
         )
         self._semaphore = asyncio.Semaphore(settings.GEMINI_MAX_CONCURRENT)
 
-    async def analyze_video(self, video_path: str) -> GeminiAnalysisResult:
+    async def analyze_video(
+        self,
+        video_path: str,
+        *,
+        file_id: str | None = None,
+        file_size: int | None = None,
+    ) -> GeminiAnalysisResult:
         async with self._semaphore:
-            return await asyncio.to_thread(self._analyze_sync, video_path)
+            return await asyncio.to_thread(
+                self._analyze_sync, video_path, file_id=file_id, file_size=file_size
+            )
 
-    def _analyze_sync(self, video_path: str, max_retries: int = 5) -> GeminiAnalysisResult:
+    def _analyze_sync(
+        self,
+        video_path: str,
+        max_retries: int = 5,
+        *,
+        file_id: str | None = None,
+        file_size: int | None = None,
+    ) -> GeminiAnalysisResult:
         last_error: Exception | None = None
-        video_uri = self._video_input_uri(video_path)
+        video_uri = self.resolve_video_uri(
+            video_path, file_id=file_id, file_size=file_size
+        )
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -47,7 +73,11 @@ class GeminiService:
             except Exception as e:
                 last_error = e
                 logger.warning("Attempt %d failed: %s", attempt, e)
-                if attempt < max_retries:
+                if attempt < max_retries and _is_transient_replicate_error(e):
+                    wait = min(10 * attempt, 60)
+                    logger.info("Transient Replicate error, waiting %ds before retry...", wait)
+                    time.sleep(wait)
+                elif attempt < max_retries:
                     wait = min(5 * attempt, 30)
                     logger.info("Waiting %ds before retry...", wait)
                     time.sleep(wait)
@@ -70,12 +100,42 @@ class GeminiService:
         with open(video_path, "rb") as video_file:
             return video_file.read(), content_type
 
-    def _video_input_uri(self, video_path: str) -> str:
-        """Return a URI Replicate can fetch directly, or inline base64 for local files."""
-        if video_path.startswith(("http://", "https://")):
-            return video_path
+    def resolve_video_uri(
+        self,
+        storage_path: str,
+        *,
+        file_id: str | None = None,
+        file_size: int | None = None,
+    ) -> str:
+        """Pick inline base64 (small files) or signed HTTPS URL (large files)."""
+        if storage_path.startswith(("http://", "https://")):
+            return storage_path
 
-        return self._video_to_data_uri(video_path)
+        from pathlib import Path
+
+        path = Path(storage_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Video not found: {storage_path}")
+
+        size_bytes = file_size if file_size is not None else path.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
+
+        if size_mb <= settings.INLINE_VIDEO_MAX_MB:
+            logger.info("Using inline video payload (%.1f MB)", size_mb)
+            return self._video_to_data_uri(storage_path)
+
+        if not file_id:
+            raise RuntimeError(
+                f"Видео {size_mb:.0f} МБ — нужен signed URL, но file_id не передан"
+            )
+
+        url = build_replicate_media_url(file_id)
+        logger.info("Using signed URL for Replicate (%.1f MB): %s", size_mb, url)
+        return url
+
+    def _video_input_uri(self, video_path: str) -> str:
+        """Backward-compatible helper for callers that only have a path."""
+        return self.resolve_video_uri(video_path)
 
     def _video_to_data_uri(self, video_path: str) -> str:
         """Encode the video as a base64 data URI passed inline to the model."""
@@ -90,19 +150,32 @@ class GeminiService:
         encoded = base64.b64encode(raw).decode("ascii")
         return f"data:{content_type};base64,{encoded}"
 
-    def start_analysis(self, video_path: str) -> str:
+    def _model_input(self, video_url: str) -> dict:
+        payload = {
+            "prompt": ANALYSIS_PROMPT,
+            "videos": [video_url],
+            "video_fps": settings.REPLICATE_VIDEO_FPS,
+            "max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+        }
+        if settings.REPLICATE_THINKING_LEVEL:
+            payload["thinking_level"] = settings.REPLICATE_THINKING_LEVEL
+        return payload
+
+    def start_analysis(
+        self,
+        storage_path: str,
+        *,
+        file_id: str | None = None,
+        file_size: int | None = None,
+    ) -> str:
         """Start Replicate prediction without blocking (for serverless)."""
-        video_uri = self._video_input_uri(video_path)
+        video_uri = self.resolve_video_uri(
+            storage_path, file_id=file_id, file_size=file_size
+        )
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,
-            input={
-                "prompt": ANALYSIS_PROMPT,
-                "videos": [video_uri],
-                "video_fps": 2,
-                "max_output_tokens": 65535,
-                "temperature": 0.2,
-                "thinking_level": "high",
-            },
+            input=self._model_input(video_uri),
         )
         return prediction.id
 
@@ -189,14 +262,7 @@ class GeminiService:
     def _run_model(self, video_url: str) -> str:
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,
-            input={
-                "prompt": ANALYSIS_PROMPT,
-                "videos": [video_url],
-                "video_fps": 2,
-                "max_output_tokens": 65535,
-                "temperature": 0.2,
-                "thinking_level": "high",
-            },
+            input=self._model_input(video_url),
         )
 
         deadline = time.time() + 1800
@@ -207,13 +273,10 @@ class GeminiService:
             prediction.reload()
 
         if prediction.status != "succeeded":
-            raise RuntimeError(prediction.error or f"Prediction ended with status {prediction.status}")
+            error = prediction.error or f"Prediction ended with status {prediction.status}"
+            raise RuntimeError(error)
 
-        output = prediction.output
-
-        if isinstance(output, list):
-            return "".join(str(chunk) for chunk in output)
-        return str(output)
+        return self._extract_output_text(prediction.output)
 
     def _parse_response(self, raw_text: str) -> GeminiAnalysisResult:
         cleaned = raw_text.strip()

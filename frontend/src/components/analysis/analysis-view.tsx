@@ -28,6 +28,31 @@ const RISK_LABELS: Record<string, string> = {
   excessive_cruelty: "Чрезмерная жестокость",
   suicide: "Суицид",
   minor_content: "Вовлечение несовершеннолетних",
+  lgbt_propaganda: "Пропаганда ЛГБТ",
+  foreign_agent: "Иноагент (проверка)",
+  pedophilia: "Педофилия",
+};
+
+const MODE_LABELS: Record<string, string> = {
+  depiction: "показ",
+  instruction: "инструкция",
+  propaganda: "пропаганда",
+  general: "общее",
+  armed_forces: "ВС РФ",
+  glorification: "героизация",
+  mention: "упоминание",
+  citation: "цитирование",
+  logo: "логотип",
+};
+
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  person: "Лицо",
+  organization: "Организация",
+  media: "СМИ",
+  channel: "Канал",
+  logo: "Логотип",
+  url: "URL",
+  handle: "Ник",
 };
 
 const LEVEL_LABELS: Record<string, string> = {
@@ -95,6 +120,11 @@ function SceneCard({ scene }: { scene: SceneAPI }) {
           {scene.risk && (
             <DetailRow label="Тип нарушения">
               {RISK_LABELS[scene.risk] || scene.risk}
+              {scene.mode && (
+                <span className="ml-1.5 text-muted-foreground">
+                  ({MODE_LABELS[scene.mode] || scene.mode})
+                </span>
+              )}
             </DetailRow>
           )}
 
@@ -222,6 +252,63 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
               {summary && (
                 <>
+                  {(summary.recommended_age_rating || summary.age_rating_reason) && (
+                    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Рекомендация по рейтингу (triage)
+                      </p>
+                      {summary.recommended_age_rating && (
+                        <p className="text-lg font-semibold tabular-nums text-foreground">
+                          {summary.recommended_age_rating}
+                        </p>
+                      )}
+                      {summary.age_rating_reason && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {summary.age_rating_reason}
+                        </p>
+                      )}
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        Не юридический вердикт — требует проверки редактором
+                      </p>
+                      {summary.age_rating_triggers &&
+                        summary.age_rating_triggers.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-xs text-foreground">
+                            {summary.age_rating_triggers.map((t, i) => (
+                              <li key={i}>
+                                Сцена {t.scene_number ?? "?"} ({t.start_time ?? "?"}):{" "}
+                                {RISK_LABELS[t.trigger ?? ""] || t.trigger}
+                                {t.reason ? ` — ${t.reason}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                    </div>
+                  )}
+
+                  {summary.entities && summary.entities.length > 0 && (
+                    <div className="border-t border-border pt-4">
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Сущности для проверки по реестрам
+                      </p>
+                      <ul className="space-y-1.5 text-xs">
+                        {summary.entities.map((e, i) => (
+                          <li key={i} className="text-foreground">
+                            <span className="font-medium">{e.name}</span>
+                            {e.type && (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                ({ENTITY_TYPE_LABELS[e.type] || e.type})
+                              </span>
+                            )}
+                            {e.context && (
+                              <span className="text-muted-foreground"> — {e.context}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   <div>
                     <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Вероятность нарушений
