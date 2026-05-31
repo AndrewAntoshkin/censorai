@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,20 @@ from app.core.database import get_db
 from app.models.analysis import Analysis, Scene
 from app.models.project import VideoFile
 from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
-from app.schemas.project import BlobUploadRequest, VideoFileResponse
+from app.schemas.project import (
+    BlobUploadRequest,
+    ChunkUploadInitRequest,
+    ChunkUploadInitResponse,
+    ChunkUploadStatusResponse,
+    VideoFileResponse,
+)
+from app.services.chunk_upload_service import (
+    chunk_size_bytes,
+    cleanup_session,
+    create_session,
+    merge_session,
+    save_part,
+)
 from app.services.docx_service import generate_report
 from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
@@ -125,6 +138,79 @@ async def upload_file(
         progress=100,
         project_id=project_id,
         folder_id=folder_id,
+        storage_path=storage_path,
+    )
+    db.add(video)
+    await db.flush()
+    await db.refresh(video)
+    return video
+
+
+@router.post("/upload-chunks/init", response_model=ChunkUploadInitResponse, status_code=201)
+async def init_chunk_upload(data: ChunkUploadInitRequest):
+    try:
+        session = create_session(
+            filename=data.filename,
+            size=data.size,
+            project_id=data.project_id,
+            folder_id=data.folder_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=413, detail=str(e)) from e
+
+    return ChunkUploadInitResponse(
+        session_id=session.session_id,
+        chunk_size=chunk_size_bytes(),
+        total_parts=session.total_parts,
+    )
+
+
+@router.put("/upload-chunks/{session_id}/parts/{part}")
+async def upload_chunk(session_id: str, part: int, request: Request):
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty chunk body")
+
+    try:
+        session = save_part(session_id, part, content)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return ChunkUploadStatusResponse(
+        session_id=session.session_id,
+        received_parts=sorted(session.received_parts),
+        total_parts=session.total_parts,
+        complete=len(session.received_parts) == session.total_parts,
+    )
+
+
+@router.post("/upload-chunks/{session_id}/complete", response_model=VideoFileResponse, status_code=201)
+async def complete_chunk_upload(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        merged_path, session = merge_session(session_id)
+        content = merged_path.read_bytes()
+        storage_path = await storage_service.save_upload(
+            session.project_id, session.filename, content
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    cleanup_session(session_id)
+
+    video = VideoFile(
+        name=session.filename,
+        size=session.size,
+        status="uploaded",
+        progress=100,
+        project_id=session.project_id,
+        folder_id=session.folder_id,
         storage_path=storage_path,
     )
     db.add(video)

@@ -53,6 +53,26 @@ class BlobUploadRequest(BaseModel):
     size: int
 
 
+class ChunkUploadInitRequest(BaseModel):
+    filename: str
+    size: int
+    project_id: str
+    folder_id: str | None = None
+
+
+class ChunkUploadInitResponse(BaseModel):
+    session_id: str
+    chunk_size: int
+    total_parts: int
+
+
+class ChunkUploadStatusResponse(BaseModel):
+    session_id: str
+    received_parts: list[int]
+    total_parts: int
+    complete: bool
+
+
 class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
