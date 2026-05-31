@@ -2,12 +2,27 @@
 
 import logging
 import os
+import re
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
+_UNSUPPORTED_QUERY_KEYS = frozenset({"channel_binding"})
+
+
+def _clean_neon_url(url: str) -> str:
+    """Drop query params that break asyncpg/psycopg2 (Neon adds channel_binding)."""
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    filtered = [(k, v) for k, v in parse_qsl(parsed.query) if k not in _UNSUPPORTED_QUERY_KEYS]
+    query = urlencode(filtered)
+    cleaned = urlunparse(parsed._replace(query=query))
+    return cleaned.rstrip("?")
+
 
 def _normalize_async_url(raw: str) -> str:
-    url = raw.strip()
+    url = _clean_neon_url(raw.strip())
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
     if url.startswith("postgresql://"):
