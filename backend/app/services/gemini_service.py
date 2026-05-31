@@ -174,12 +174,74 @@ class GeminiService:
         if status != "succeeded":
             raise RuntimeError(prediction.error or f"Prediction ended with status {status}")
 
-        output = prediction.output
+        raw = self._extract_output_text(prediction.output)
+        logger.info("Replicate output received (%d chars)", len(raw))
+        try:
+            return status, self._parse_response(raw)
+        except Exception as e:
+            logger.error("Failed to parse Replicate output (first 800 chars): %s", raw[:800])
+            raise RuntimeError(f"Failed to parse model response: {e}") from e
+
+    def _extract_output_text(self, output) -> str:
+        if output is None:
+            raise ValueError("Empty Replicate output")
+
+        if isinstance(output, dict):
+            if "scenes" in output:
+                return json.dumps(output, ensure_ascii=False)
+            for key in ("text", "output", "content", "response"):
+                if key in output and output[key]:
+                    return str(output[key])
+            return json.dumps(output, ensure_ascii=False)
+
         if isinstance(output, list):
-            raw = "".join(str(chunk) for chunk in output)
-        else:
-            raw = str(output)
-        return status, self._parse_response(raw)
+            chunks: list[str] = []
+            for item in output:
+                if isinstance(item, str):
+                    chunks.append(item)
+                elif isinstance(item, dict):
+                    item_type = str(item.get("type", "")).lower()
+                    if "thought" in item_type or item_type in {"reasoning", "signature"}:
+                        continue
+                    text = item.get("text") or item.get("content") or item.get("output")
+                    if text:
+                        chunks.append(str(text))
+                elif item is not None:
+                    text = str(item)
+                    if text.startswith("{") or text.startswith("[") or "scene" in text.lower():
+                        chunks.append(text)
+            raw = "".join(chunks).strip()
+            if raw:
+                return raw
+            raise ValueError("Replicate returned no text output")
+
+        if isinstance(output, str):
+            if output.startswith("http://") or output.startswith("https://"):
+                with httpx.Client(timeout=120, follow_redirects=True) as client:
+                    response = client.get(output)
+                response.raise_for_status()
+                return response.text
+            return output
+
+        return str(output)
+
+    def _normalize_parsed_data(self, data: dict) -> dict:
+        scenes = data.get("scenes") or []
+        normalized_scenes = []
+        for index, scene in enumerate(scenes):
+            if not isinstance(scene, dict):
+                continue
+            scene_copy = dict(scene)
+            if "scene_number" not in scene_copy:
+                scene_copy["scene_number"] = index + 1
+            risks = scene_copy.get("risks")
+            if risks is None:
+                scene_copy["risks"] = []
+            elif isinstance(risks, dict):
+                scene_copy["risks"] = [risks]
+            normalized_scenes.append(scene_copy)
+        data["scenes"] = normalized_scenes
+        return data
 
     def _run_model(self, video_url: str) -> str:
         prediction = self._client.predictions.create(
@@ -232,6 +294,9 @@ class GeminiService:
         except json.JSONDecodeError:
             logger.warning("Direct JSON parse failed, trying to repair truncated JSON...")
             data = self._repair_truncated_json(cleaned)
+
+        if isinstance(data, dict):
+            data = self._normalize_parsed_data(data)
 
         return GeminiAnalysisResult.model_validate(data)
 

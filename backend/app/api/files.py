@@ -44,7 +44,7 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
         _status, result = await asyncio.to_thread(
             gemini_service.poll_prediction, video.replicate_prediction_id
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Poll failed for file %s", video.id)
         video.status = "error"
         video.replicate_prediction_id = None
@@ -56,8 +56,14 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
         await db.flush()
         return
 
-    await _save_analysis_result(video, db, result)
-    video.replicate_prediction_id = None
+    try:
+        await _save_analysis_result(video, db, result)
+        video.replicate_prediction_id = None
+    except Exception:
+        logger.exception("Failed to save analysis for file %s", video.id)
+        video.status = "error"
+        video.replicate_prediction_id = None
+        await db.flush()
 
 
 async def _save_analysis_result(

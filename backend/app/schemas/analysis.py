@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class SceneResponse(BaseModel):
@@ -46,6 +46,8 @@ class AnalysisResponse(BaseModel):
 # --- Gemini response parsing schemas ---
 
 class GeminiSceneRisk(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     risk: str | None = None
     risk_level: str | None = None
     probability: float | None = None
@@ -54,8 +56,17 @@ class GeminiSceneRisk(BaseModel):
     text_in_frame: str | None = None
     recommendation: str | None = None
 
+    @field_validator("probability", mode="before")
+    @classmethod
+    def coerce_probability(cls, value):
+        if value is None or value == "":
+            return None
+        return float(value)
+
 
 class GeminiScene(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     scene_number: int
     start_time: str | None = None
     end_time: str | None = None
@@ -64,6 +75,8 @@ class GeminiScene(BaseModel):
 
 
 class GeminiAnalysisResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     video_title: str | None = None
     duration: str | None = None
     scenes: list[GeminiScene] = []
