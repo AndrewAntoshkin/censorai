@@ -101,30 +101,22 @@ async def _save_analysis_result(
     await db.refresh(analysis)
 
     for gs in gemini_result.scenes:
-        if gs.risks:
-            for risk_item in gs.risks:
-                scene = Scene(
-                    analysis_id=analysis.id,
-                    scene_number=gs.scene_number,
-                    start_time=gs.start_time,
-                    end_time=gs.end_time,
-                    description=gs.description,
-                    risk=risk_item.risk,
-                    risk_level=risk_item.risk_level,
-                    probability=risk_item.probability,
-                    reason=risk_item.reason,
-                    quote=risk_item.quote,
-                    text_in_frame=risk_item.text_in_frame,
-                    recommendation=risk_item.recommendation,
-                )
-                db.add(scene)
-        else:
+        if not gs.risks:
+            continue
+        for risk_item in gs.risks:
             scene = Scene(
                 analysis_id=analysis.id,
                 scene_number=gs.scene_number,
                 start_time=gs.start_time,
                 end_time=gs.end_time,
                 description=gs.description,
+                risk=risk_item.risk,
+                risk_level=risk_item.risk_level,
+                probability=risk_item.probability,
+                reason=risk_item.reason,
+                quote=risk_item.quote,
+                text_in_frame=risk_item.text_in_frame,
+                recommendation=risk_item.recommendation,
             )
             db.add(scene)
 
@@ -425,26 +417,25 @@ async def download_report(file_id: str, db: AsyncSession = Depends(get_db)):
 
 
 def _build_summary_dict(gemini_result) -> dict:
-    total = len(gemini_result.scenes)
-    risky = 0
+    scenes_with_risks = [gs for gs in gemini_result.scenes if gs.risks]
+    total_reviewed = gemini_result.total_scenes_reviewed or len(gemini_result.scenes)
+    risky_scene_numbers = {gs.scene_number for gs in scenes_with_risks}
     categories: dict[str, int] = {}
     critical = 0
     warning = 0
 
-    for gs in gemini_result.scenes:
-        if gs.risks:
-            risky += 1
-            for r in gs.risks:
-                if r.risk:
-                    categories[r.risk] = categories.get(r.risk, 0) + 1
-                if r.risk_level == "critical":
-                    critical += 1
-                elif r.risk_level == "warning":
-                    warning += 1
+    for gs in scenes_with_risks:
+        for r in gs.risks:
+            if r.risk:
+                categories[r.risk] = categories.get(r.risk, 0) + 1
+            if r.risk_level == "critical":
+                critical += 1
+            elif r.risk_level == "warning":
+                warning += 1
 
     return {
-        "total_scenes": total,
-        "risky_scenes": risky,
+        "total_scenes": total_reviewed,
+        "risky_scenes": len(risky_scene_numbers),
         "risk_categories": categories,
         "critical_count": critical,
         "warning_count": warning,

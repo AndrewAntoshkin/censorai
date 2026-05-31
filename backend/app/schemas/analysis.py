@@ -79,4 +79,5 @@ class GeminiAnalysisResult(BaseModel):
 
     video_title: str | None = None
     duration: str | None = None
+    total_scenes_reviewed: int | None = None
     scenes: list[GeminiScene] = []

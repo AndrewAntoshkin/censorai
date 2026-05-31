@@ -141,7 +141,6 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
   const [analysis, setAnalysis] = useState<AnalysisAPI | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"violations" | "all">("violations");
 
   useEffect(() => {
     let active = true;
@@ -178,8 +177,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
     );
   }
 
-  const riskyScenes = analysis.scenes.filter((s) => s.risk);
-  const displayScenes = tab === "violations" ? riskyScenes : analysis.scenes;
+  const violationScenes = analysis.scenes.filter((s) => s.risk);
   const summary = analysis.summary;
 
   return (
@@ -205,7 +203,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
           <p className="mb-7 text-sm text-muted-foreground">
             {[
               analysis.duration,
-              summary ? `${summary.total_scenes} сцен` : null,
+              summary ? `${summary.risky_scenes} нарушений из ${summary.total_scenes} сцен` : null,
               analysis.analyzed_at
                 ? `проверено ${new Date(analysis.analyzed_at).toLocaleDateString("ru-RU")}`
                 : null,
@@ -311,40 +309,17 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
           </aside>
 
           <div className="min-w-0 flex-1">
-            <div className="mb-4 flex items-center gap-5 border-b border-border">
-              <button
-                onClick={() => setTab("violations")}
-                className={cn(
-                  "-mb-px border-b-2 pb-2.5 text-sm font-medium transition-colors",
-                  tab === "violations"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Возможные нарушения ({riskyScenes.length})
-              </button>
-              <button
-                onClick={() => setTab("all")}
-                className={cn(
-                  "-mb-px border-b-2 pb-2.5 text-sm font-medium transition-colors",
-                  tab === "all"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Все сцены ({analysis.scenes.length})
-              </button>
-            </div>
+            <h3 className="mb-4 text-sm font-semibold text-foreground">
+              Нарушения ({violationScenes.length})
+            </h3>
 
             <div className="space-y-3">
-              {displayScenes.map((scene) => (
+              {violationScenes.map((scene) => (
                 <SceneCard key={scene.id} scene={scene} />
               ))}
-              {displayScenes.length === 0 && (
+              {violationScenes.length === 0 && (
                 <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-                  {tab === "violations"
-                    ? "Нарушений не обнаружено"
-                    : "Сцены не найдены"}
+                  Нарушений не обнаружено
                 </div>
               )}
             </div>

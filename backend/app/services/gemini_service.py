@@ -242,6 +242,11 @@ class GeminiService:
 
         if isinstance(data, dict):
             data = self._normalize_parsed_data(data)
+            data["scenes"] = [
+                scene
+                for scene in data.get("scenes", [])
+                if isinstance(scene, dict) and scene.get("risks")
+            ]
 
         return GeminiAnalysisResult.model_validate(data)
 
