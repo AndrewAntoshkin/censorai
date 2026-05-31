@@ -8,7 +8,7 @@ resolve_database_env()
 
 if os.getenv("VERCEL"):
     os.environ.setdefault("UPLOAD_DIR", "/tmp/uploads")
-    if not os.getenv("DATABASE_URL"):
+    if not os.getenv("DATABASE_URL", "").strip():
         os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:////tmp/censorai.db")
         os.environ.setdefault("DATABASE_URL_SYNC", "sqlite:////tmp/censorai.db")
 

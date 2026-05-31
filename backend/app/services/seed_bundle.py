@@ -22,8 +22,17 @@ _seed_lock = threading.Lock()
 _demo_ready = False
 
 
+def _sync_engine():
+    from sqlalchemy import create_engine
+
+    connect_args: dict = {}
+    if "postgres" in settings.DATABASE_URL_SYNC:
+        connect_args = {"sslmode": "require"}
+    return create_engine(settings.DATABASE_URL_SYNC, connect_args=connect_args)
+
+
 def _demo_exists() -> bool:
-    engine = create_engine(settings.DATABASE_URL_SYNC)
+    engine = _sync_engine()
     with Session(engine) as session:
         return bool(
             session.scalar(select(Project.id).where(Project.name == DEMO_MARKER))
@@ -59,7 +68,7 @@ def load_demo_bundle_if_empty() -> bool:
         logger.warning("Demo bundle not found at %s", BUNDLE_PATH)
         return False
 
-    engine = create_engine(settings.DATABASE_URL_SYNC)
+    engine = _sync_engine()
     with Session(engine) as session:
         demo_exists = session.scalar(
             select(Project.id).where(Project.name == DEMO_MARKER)

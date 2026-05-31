@@ -30,17 +30,20 @@ def _normalize_sync_url(raw: str) -> str:
 
 def resolve_database_env() -> None:
     """Map POSTGRES_URL / Neon / Vercel Postgres vars to SQLAlchemy URLs."""
+
+    def _get(name: str) -> str:
+        return os.getenv(name, "").strip()
+
     raw = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("POSTGRES_URL")
-        or os.getenv("STORAGE_URL")
-        or os.getenv("POSTGRES_PRISMA_URL")
-        or os.getenv("STORAGE_PRISMA_URL")
-        or os.getenv("POSTGRES_URL_NON_POOLING")
-        or os.getenv("STORAGE_URL_NON_POOLING")
-        or os.getenv("DATABASE_URL_UNPOOLED")
-        or ""
-    ).strip()
+        _get("DATABASE_URL")
+        or _get("POSTGRES_URL")
+        or _get("STORAGE_URL")
+        or _get("POSTGRES_PRISMA_URL")
+        or _get("STORAGE_PRISMA_URL")
+        or _get("POSTGRES_URL_NON_POOLING")
+        or _get("STORAGE_URL_NON_POOLING")
+        or _get("DATABASE_URL_UNPOOLED")
+    )
     if not raw:
         return
 

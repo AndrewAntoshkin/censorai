@@ -33,6 +33,9 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    from app.core.db_init import ensure_database
+
+    await ensure_database()
     async with async_session_factory() as session:
         try:
             yield session
