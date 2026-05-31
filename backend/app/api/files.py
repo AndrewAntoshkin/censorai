@@ -44,7 +44,25 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
         _status, result = await asyncio.to_thread(
             gemini_service.poll_prediction, video.replicate_prediction_id
         )
-    except Exception:
+    except Exception as exc:
+        err = str(exc).lower()
+        if (
+            ("interrupted" in err or "code: pa" in err)
+            and video.storage_path
+            and video.progress < 40
+        ):
+            logger.warning("Replicate interrupted, retrying analysis for file %s", video.id)
+            try:
+                prediction_id = await asyncio.to_thread(
+                    gemini_service.start_analysis, video.storage_path
+                )
+                video.replicate_prediction_id = prediction_id
+                video.progress = 40
+                await db.flush()
+                return
+            except Exception:
+                logger.exception("Retry failed for file %s", video.id)
+
         logger.exception("Poll failed for file %s", video.id)
         video.status = "error"
         video.replicate_prediction_id = None

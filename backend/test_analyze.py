@@ -16,71 +16,11 @@ import time
 
 import replicate
 
+from app.services.analysis_prompts import VIDEO_ANALYSIS_PROMPT
 
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 REPLICATE_MODEL = "google/gemini-3.5-flash"
-
-ANALYSIS_PROMPT = """Ты — профессиональный цензор видеоконтента. Проанализируй данное видео последовательно от начала до конца.
-
-Разбей видео на сцены. Для каждой сцены:
-1. Укажи номер сцены, время начала и конца (формат MM:SS или HH:MM:SS)
-2. Подробно опиши происходящее в сцене
-3. Оцени наличие рисков из следующих категорий:
-
-КАТЕГОРИИ РИСКОВ:
-- drugs — наркотики и наркотические средства
-- weapons — оружие
-- violence — насилие
-- sexual_content — сексуальный контент
-- profanity — нецензурная лексика
-- illegal_actions — незаконные действия
-- alcohol — алкоголь
-- smoking — курение
-- animal_cruelty — жестокое обращение с животными
-- forbidden_symbols — запрещённая символика
-- text_in_frame — опасный/запрещённый текст в кадре
-- discreditation_values — дискредитация ценностей
-- propaganda — пропаганда
-- crime_glorification — героизация преступлений
-- excessive_cruelty — чрезмерная жестокость
-
-Для КАЖДОЙ сцены с обнаруженным риском средней или высокой вероятности укажи:
-- risk: категория риска (из списка выше)
-- risk_level: уровень ("critical", "warning" или "info")
-- probability: вероятность от 0.0 до 1.0
-- reason: подробная причина на русском языке
-- quote: цитата или описание конкретного момента
-- text_in_frame: если есть текст в кадре — укажи его
-- recommendation: рекомендация ("remove" — удалить, "shorten" — сократить, "mute" — заглушить звук, "blur" — заблюрить)
-
-Отмечай только риски со средней и высокой вероятностью (probability >= 0.5).
-Если в сцене несколько рисков — укажи каждый отдельно в массиве risks.
-Если рисков нет — оставь массив risks пустым.
-
-Верни результат СТРОГО в формате JSON (без markdown-блоков, без пояснений, только чистый JSON):
-{
-  "video_title": "название или описание видео",
-  "duration": "общая длительность видео",
-  "scenes": [
-    {
-      "scene_number": 1,
-      "start_time": "00:00",
-      "end_time": "00:30",
-      "description": "Описание сцены",
-      "risks": [
-        {
-          "risk": "категория",
-          "risk_level": "critical",
-          "probability": 0.85,
-          "reason": "Причина",
-          "quote": "Цитата или описание момента",
-          "text_in_frame": null,
-          "recommendation": "remove"
-        }
-      ]
-    }
-  ]
-}"""
+ANALYSIS_PROMPT = VIDEO_ANALYSIS_PROMPT
 
 
 RISK_LABELS = {
@@ -112,6 +52,8 @@ REC_LABELS = {
     "shorten": "Сократить",
     "mute": "Заглушить",
     "blur": "Заблюрить",
+    "info": "Информирование",
+    "mark": "Маркировка",
 }
 
 
@@ -168,8 +110,10 @@ def main():
         input={
             "prompt": ANALYSIS_PROMPT,
             "videos": [video_uri],
+            "video_fps": 2,
             "max_output_tokens": 65535,
-            "temperature": 0.3,
+            "temperature": 0.2,
+            "thinking_level": "high",
         },
     )
 

@@ -43,6 +43,7 @@ const REC_LABELS: Record<string, string> = {
   blur: "Размыть",
   edit: "Отредактировать",
   mark: "Добавить маркировку",
+  info: "Информирование",
 };
 
 function RiskLevelBadge({ level }: { level: string }) {
