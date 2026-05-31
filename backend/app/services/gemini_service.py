@@ -91,9 +91,7 @@ class GeminiService:
 
     def _analyze_sync(self, video_path: str, max_retries: int = 5) -> GeminiAnalysisResult:
         last_error: Exception | None = None
-
-        video_uri = self._video_to_data_uri(video_path)
-        last_error: Exception | None = None
+        video_uri = self._video_input_uri(video_path)
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -131,6 +129,13 @@ class GeminiService:
         with open(video_path, "rb") as video_file:
             return video_file.read(), content_type
 
+    def _video_input_uri(self, video_path: str) -> str:
+        """Return a URI Replicate can fetch directly, or inline base64 for local files."""
+        if video_path.startswith(("http://", "https://")):
+            return video_path
+
+        return self._video_to_data_uri(video_path)
+
     def _video_to_data_uri(self, video_path: str) -> str:
         """Encode the video as a base64 data URI passed inline to the model."""
         raw, content_type = self._read_video_bytes(video_path)
@@ -146,7 +151,7 @@ class GeminiService:
 
     def start_analysis(self, video_path: str) -> str:
         """Start Replicate prediction without blocking (for serverless)."""
-        video_uri = self._video_to_data_uri(video_path)
+        video_uri = self._video_input_uri(video_path)
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,
             input={

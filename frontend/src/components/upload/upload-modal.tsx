@@ -96,65 +96,85 @@ async function waitForAnalysis(
   }
 }
 
+const BLOB_MULTIPART_THRESHOLD = 8 * 1024 * 1024;
+const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function uploadViaBlob(
+  file: File,
+  uploadUrl: string,
+  onProgress: (progress: number, hint?: string) => void
+): Promise<{ url: string }> {
+  const { upload } = await import("@vercel/blob/client");
+  const useMultipart = file.size >= BLOB_MULTIPART_THRESHOLD;
+
+  onProgress(5, useMultipart ? "Подготовка частей…" : "Подключение к хранилищу…");
+
+  const startedAt = Date.now();
+  let lastPercent = 0;
+  const heartbeat = setInterval(() => {
+    const sec = Math.round((Date.now() - startedAt) / 1000);
+    if (lastPercent === 0 && sec >= 8) {
+      onProgress(
+        5,
+        `Ожидание ответа от хранилища… ${sec} сек (проверьте интернет)`
+      );
+    }
+  }, 3000);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+
+  try {
+    return await upload(file.name, file, {
+      access: "public",
+      contentType: file.type || "video/mp4",
+      handleUploadUrl: uploadUrl,
+      multipart: useMultipart,
+      abortSignal: controller.signal,
+      onUploadProgress: ({ percentage }) => {
+        lastPercent = percentage;
+        onProgress(
+          Math.max(5, Math.round(percentage * 0.85)),
+          `Загрузка в облако… ${Math.round(percentage)}%`
+        );
+      },
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        "Загрузка заняла больше 5 минут. Попробуйте снова или используйте файл до 15 МБ."
+      );
+    }
+    const message = err instanceof Error ? err.message : "Upload failed";
+    if (/blob|token|storage/i.test(message)) {
+      throw new Error(
+        "Не удалось подключиться к Vercel Blob. В настройках проекта нужен BLOB_READ_WRITE_TOKEN."
+      );
+    }
+    throw err instanceof Error ? err : new Error(message);
+  } finally {
+    clearInterval(heartbeat);
+    clearTimeout(timeout);
+  }
+}
+
 async function uploadFileToProject(
   file: File,
   projectId: string,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload(file)) {
-    const { upload } = await import("@vercel/blob/client");
     const uploadUrl =
       typeof window !== "undefined"
         ? `${window.location.origin}/upload/blob`
         : "/upload/blob";
 
-    onProgress(8, "Подключение к хранилищу…");
-
-    const startedAt = Date.now();
-    const heartbeat = setInterval(() => {
-      const sec = Math.round((Date.now() - startedAt) / 1000);
-      if (sec >= 4) {
-        onProgress(
-          Math.min(84, 8 + sec),
-          `Загрузка ${formatFileSize(file.size)} в облако… ${sec} сек`
-        );
-      }
-    }, 2000);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15 * 60 * 1000);
-
     let blob: { url: string };
     try {
-      blob = await upload(file.name, file, {
-        access: "public",
-        contentType: file.type || "video/mp4",
-        handleUploadUrl: uploadUrl,
-        // Multipart adds extra round-trips; keep simple upload up to 100 MB.
-        multipart: file.size > 100 * 1024 * 1024,
-        abortSignal: controller.signal,
-        onUploadProgress: ({ percentage }) =>
-          onProgress(
-            Math.max(8, Math.round(percentage * 0.85)),
-            `Загрузка в облако… ${Math.round(percentage)}%`
-          ),
-      });
-    } catch (err) {
-      if (controller.signal.aborted) {
-        throw new Error(
-          "Загрузка заняла слишком много времени. Проверьте интернет и попробуйте снова."
-        );
-      }
-      const message = err instanceof Error ? err.message : "Upload failed";
-      if (/blob|token|storage/i.test(message)) {
-        throw new Error(
-          "Не удалось подключиться к Vercel Blob. В настройках проекта нужен BLOB_READ_WRITE_TOKEN."
-        );
-      }
-      throw err instanceof Error ? err : new Error(message);
-    } finally {
-      clearInterval(heartbeat);
-      clearTimeout(timeout);
+      blob = await uploadViaBlob(file, uploadUrl, onProgress);
+    } catch (firstError) {
+      onProgress(3, "Повторная попытка загрузки…");
+      blob = await uploadViaBlob(file, uploadUrl, onProgress);
     }
 
     onProgress(90, "Регистрация файла…");
