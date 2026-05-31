@@ -66,9 +66,13 @@ async def lifespan(app: FastAPI):
 
     import app.models  # noqa: F401 — ensure all models are registered
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    _migrate_columns()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await asyncio.to_thread(_migrate_columns)
+    except Exception:
+        logger.exception("Database initialization failed")
+        raise
 
     await asyncio.to_thread(_seed_demo_if_needed)
 
