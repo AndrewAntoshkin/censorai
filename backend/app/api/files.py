@@ -63,8 +63,7 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
         try:
             video.progress = 40
             await db.flush()
-            result = await asyncio.to_thread(
-                gemini_service.analyze_video,
+            result = await gemini_service.analyze_video(
                 video.storage_path,
                 file_id=video.id,
                 file_size=video.size,
