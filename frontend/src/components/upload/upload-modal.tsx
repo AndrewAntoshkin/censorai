@@ -31,6 +31,8 @@ interface UploadModalProps {
 
 const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024;
 const CHUNK_SIZE = 3 * 1024 * 1024;
+const BLOB_MULTIPART_THRESHOLD = 4 * 1024 * 1024;
+const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
@@ -46,8 +48,18 @@ function displayFileName(name: string): string {
   }
 }
 
+function isLocalDev(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
+}
+
+function shouldUseBlobUpload(): boolean {
+  return !isLocalDev();
+}
+
 function shouldUseChunkUpload(file: File): boolean {
-  return file.size > DIRECT_UPLOAD_LIMIT;
+  return isLocalDev() && file.size > DIRECT_UPLOAD_LIMIT;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -92,6 +104,91 @@ async function waitForAnalysis(
   if (finalFile.status !== "analyzed") {
     throw new Error("Analysis timed out");
   }
+}
+
+function useBlobMultipart(file: File): boolean {
+  return !isLocalDev() || file.size >= BLOB_MULTIPART_THRESHOLD;
+}
+
+async function uploadViaBlob(
+  file: File,
+  uploadUrl: string,
+  onProgress: (progress: number, hint?: string) => void
+): Promise<{ url: string }> {
+  const { upload } = await import("@vercel/blob/client");
+  const useMultipart = useBlobMultipart(file);
+
+  onProgress(5, useMultipart ? "Подготовка частей…" : "Подключение к хранилищу…");
+
+  const startedAt = Date.now();
+  let lastPercent = 0;
+  const heartbeat = setInterval(() => {
+    const sec = Math.round((Date.now() - startedAt) / 1000);
+    if (lastPercent === 0 && sec >= 8) {
+      onProgress(5, `Ожидание ответа от хранилища… ${sec} сек`);
+    }
+  }, 3000);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+
+  try {
+    return await upload(file.name, file, {
+      access: "public",
+      contentType: file.type || "video/mp4",
+      handleUploadUrl: uploadUrl,
+      multipart: useMultipart,
+      abortSignal: controller.signal,
+      onUploadProgress: ({ percentage }) => {
+        lastPercent = percentage;
+        onProgress(
+          Math.max(5, Math.round(percentage * 0.85)),
+          `Загрузка в облако… ${Math.round(percentage)}%`
+        );
+      },
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error("Загрузка заняла слишком много времени. Попробуйте снова.");
+    }
+    const message = err instanceof Error ? err.message : "Upload failed";
+    if (/blob|token|storage/i.test(message)) {
+      throw new Error(
+        "Не удалось подключиться к Vercel Blob. Нужен BLOB_READ_WRITE_TOKEN в настройках Vercel."
+      );
+    }
+    throw err instanceof Error ? err : new Error(message);
+  } finally {
+    clearInterval(heartbeat);
+    clearTimeout(timeout);
+  }
+}
+
+async function registerBlobAndAnalyze(
+  file: File,
+  projectId: string,
+  blobUrl: string,
+  onProgress: (progress: number, hint?: string) => void
+): Promise<VideoFileAPI> {
+  onProgress(90, "Регистрация и запуск анализа…");
+  const res = await fetch(
+    `${getApiBase()}/api/files/from-blob?project_id=${encodeURIComponent(projectId)}&auto_analyze=1`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        blob_url: blobUrl,
+        filename: file.name,
+        size: file.size,
+      }),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Register failed: ${res.status} ${body}`);
+  }
+  onProgress(100, "Файл загружен");
+  return res.json();
 }
 
 async function uploadViaChunks(
@@ -145,7 +242,7 @@ async function uploadViaChunks(
     onProgress(percent, `Загрузка на сервер… ${part + 1}/${totalParts}`);
   }
 
-  onProgress(90, "Сборка файла и анализ · может занять 5–15 мин…");
+  onProgress(90, "Сборка файла…");
   const completeRes = await fetch(
     `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
     { method: "POST" }
@@ -164,6 +261,23 @@ async function uploadFileToProject(
   projectId: string,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
+  if (shouldUseBlobUpload()) {
+    const uploadUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/upload/blob`
+        : "/upload/blob";
+
+    let blob: { url: string };
+    try {
+      blob = await uploadViaBlob(file, uploadUrl, onProgress);
+    } catch (firstError) {
+      onProgress(3, "Повторная попытка загрузки…");
+      blob = await uploadViaBlob(file, uploadUrl, onProgress);
+    }
+
+    return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+  }
+
   if (shouldUseChunkUpload(file)) {
     return uploadViaChunks(file, projectId, onProgress);
   }

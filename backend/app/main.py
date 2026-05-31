@@ -64,7 +64,19 @@ async def lifespan(app: FastAPI):
     _migrate_columns()
 
     await asyncio.to_thread(_seed_demo_if_needed)
-    logger.info("Database tables created")
+
+    from app.core.db_url import is_ephemeral_sqlite
+    import os as _os
+
+    if _os.getenv("VERCEL") and is_ephemeral_sqlite():
+        logger.warning(
+            "VERCEL without external Postgres: SQLite in /tmp is per-instance — "
+            "uploads and analysis status will be lost across cold starts. "
+            "Add Vercel Postgres or Neon and set POSTGRES_URL."
+        )
+    else:
+        db_kind = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
+        logger.info("Database ready (%s)", db_kind)
 
     yield
 
@@ -103,7 +115,15 @@ app.include_router(books_router)
 
 @app.get(settings.route_prefix("/health"))
 async def health_check():
-    return {"status": "ok", "service": "framecheck"}
+    from app.core.db_url import is_ephemeral_sqlite
+
+    db = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
+    return {
+        "status": "ok",
+        "service": "framecheck",
+        "database": db,
+        "ephemeral_db": is_ephemeral_sqlite(),
+    }
 
 
 @app.post(settings.route_prefix("/seed-demo"))

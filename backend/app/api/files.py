@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import mimetypes
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,7 +40,7 @@ router = APIRouter(prefix=settings.route_prefix("/files"), tags=["files"])
 
 
 async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
-    """Run analysis on the same instance that holds the uploaded file."""
+    """Start non-blocking Replicate prediction (Blob URL or local path)."""
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
 
@@ -49,35 +48,12 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
     if not video.storage_path.startswith(("http://", "https://")) and not path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Video file not found on server. Retry upload on Vercel or use persistent storage.",
+            detail="Video file not found on server. Use Blob upload on Vercel.",
         )
 
     video.status = "analyzing"
     video.progress = 20
     await db.flush()
-
-    # On Vercel: run full analysis synchronously in this request so the file
-    # stays on /tmp and PA retries can re-read it. Async poll hits other instances
-    # where the file is gone → retry fails.
-    if os.getenv("VERCEL"):
-        try:
-            video.progress = 40
-            await db.flush()
-            result = await gemini_service.analyze_video(
-                video.storage_path,
-                file_id=video.id,
-                file_size=video.size,
-            )
-            video.progress = 90
-            await db.flush()
-            await _save_analysis_result(video, db, result)
-            return
-        except Exception as exc:
-            logger.exception("Sync analysis failed for file %s", video.id)
-            video.status = "error"
-            video.replicate_prediction_id = None
-            await db.flush()
-            raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
 
     try:
         prediction_id = await asyncio.to_thread(
@@ -326,6 +302,7 @@ async def register_from_blob(
     project_id: str,
     data: BlobUploadRequest,
     folder_id: str | None = None,
+    auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     size_mb = data.size / (1024 * 1024)
@@ -347,6 +324,11 @@ async def register_from_blob(
     db.add(video)
     await db.flush()
     await db.refresh(video)
+
+    if auto_analyze:
+        await _kickoff_analysis(video, db)
+        await db.refresh(video)
+
     return video
 
 
