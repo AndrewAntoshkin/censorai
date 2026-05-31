@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { ArrowLeft, Download, Film, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { riskLevelStyle } from "@/lib/risk";
@@ -72,20 +72,11 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 function SceneCard({ scene }: { scene: SceneAPI }) {
   const accent = scene.risk_level ? riskLevelStyle(scene.risk_level) : null;
   return (
-    <div className="flex gap-5 rounded-xl border border-border bg-card p-4">
-      <div className="relative flex h-28 w-48 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-        <Film className="h-7 w-7 text-muted-foreground/50" />
-        {accent && (
-          <span className={cn("absolute left-0 top-0 h-full w-1", accent.bar)} />
-        )}
-        {scene.start_time && (
-          <span className="absolute bottom-1.5 left-1.5 rounded bg-background/85 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-foreground backdrop-blur">
-            {scene.start_time}
-          </span>
-        )}
-      </div>
-
-      <div className="min-w-0 flex-1">
+    <div className="relative rounded-xl border border-border bg-card p-4">
+      {accent && (
+        <span className={cn("absolute left-0 top-3 bottom-3 w-1 rounded-full", accent.bar)} />
+      )}
+      <div className={cn("min-w-0", accent && "pl-3")}>
         <div className="mb-3 flex items-start justify-between gap-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Сцена {scene.scene_number}
