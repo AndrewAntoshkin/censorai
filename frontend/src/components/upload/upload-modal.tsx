@@ -145,7 +145,7 @@ async function uploadViaChunks(
     onProgress(percent, `Загрузка на сервер… ${part + 1}/${totalParts}`);
   }
 
-  onProgress(90, "Сборка файла…");
+  onProgress(90, "Сборка файла и анализ · может занять 5–15 мин…");
   const completeRes = await fetch(
     `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
     { method: "POST" }
@@ -234,14 +234,25 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
           (progress, hint) => updateFile(i, { progress, statusHint: hint })
         );
         updateFile(i, {
-          status: uploadedFile.status === "analyzing" ? "analyzing" : "uploaded",
-          progress: uploadedFile.status === "analyzing" ? 30 : 100,
+          status:
+            uploadedFile.status === "analyzed"
+              ? "done"
+              : uploadedFile.status === "analyzing"
+                ? "analyzing"
+                : "uploaded",
+          progress: uploadedFile.status === "analyzed" ? 100 : uploadedFile.status === "analyzing" ? 30 : 100,
           fileId: uploadedFile.id,
           statusHint:
-            uploadedFile.status === "analyzing"
-              ? "Анализ запущен…"
-              : "Запуск анализа…",
+            uploadedFile.status === "analyzed"
+              ? "Анализ завершён"
+              : uploadedFile.status === "analyzing"
+                ? "Анализ запущен…"
+                : "Запуск анализа…",
         });
+
+        if (uploadedFile.status === "analyzed") {
+          continue;
+        }
 
         if (uploadedFile.status !== "analyzing") {
           updateFile(i, { status: "analyzing", progress: 10, statusHint: "Отправка в Replicate…" });

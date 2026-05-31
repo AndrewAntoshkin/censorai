@@ -158,7 +158,7 @@ class GeminiService:
             "max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
             "temperature": 0.2,
         }
-        if settings.REPLICATE_THINKING_LEVEL:
+        if settings.REPLICATE_THINKING_LEVEL and settings.REPLICATE_THINKING_LEVEL != "none":
             payload["thinking_level"] = settings.REPLICATE_THINKING_LEVEL
         return payload
 

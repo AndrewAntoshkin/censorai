@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     REPLICATE_MAX_VIDEO_MINUTES: int = 45
 
     REPLICATE_VIDEO_FPS: float = 1
-    REPLICATE_MAX_OUTPUT_TOKENS: int = 32768
-    REPLICATE_THINKING_LEVEL: str = "low"
+    REPLICATE_MAX_OUTPUT_TOKENS: int = 16384
+    REPLICATE_THINKING_LEVEL: str = "none"
 
     HTTPS_PROXY_URL: str = ""
 
