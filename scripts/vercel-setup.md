@@ -41,6 +41,7 @@ curl https://censorai.vercel.app/api/health
 | `VIDEO_PROVIDER` | `replicate` |
 | `POSTGRES_URL` | автоматически из Vercel Postgres |
 | `BLOB_READ_WRITE_TOKEN` | автоматически из Vercel Blob |
+| `BLOB_STORE_ID` | автоматически из Vercel Blob (нужен для backend put) |
 | `PUBLIC_API_BASE_URL` | `https://censorai.vercel.app` (опционально, для signed URL >100 МБ) |
 
 ## 4. Deploy

@@ -11,8 +11,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
-from app.services.blob_storage import blob_enabled, fetch_bytes, public_blob_url, put_bytes
+from app.models.upload_session import UploadChunkSession
+from app.services.blob_storage import blob_enabled, fetch_bytes, put_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +45,15 @@ class UploadSession:
     def part_path(self, part: int) -> Path:
         return self.dir / f"part-{part:05d}"
 
-    def _meta_blob_path(self) -> str:
-        return f"chunks/{self.session_id}/meta.json"
-
     def _part_blob_path(self, part: int) -> str:
         return f"chunks/{self.session_id}/part-{part:05d}"
 
 
-def _use_blob_chunks() -> bool:
+def _use_db_sessions() -> bool:
+    return "postgres" in settings.DATABASE_URL
+
+
+def _use_blob_parts() -> bool:
     return blob_enabled() and bool(os.getenv("VERCEL"))
 
 
@@ -56,6 +61,13 @@ def _sessions_root() -> Path:
     root = Path(settings.UPLOAD_DIR) / "_chunk_sessions"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _sync_engine():
+    connect_args: dict = {}
+    if "postgres" in settings.DATABASE_URL_SYNC:
+        connect_args = {"sslmode": "require"}
+    return create_engine(settings.DATABASE_URL_SYNC, connect_args=connect_args)
 
 
 def _session_to_dict(session: UploadSession) -> dict:
@@ -90,24 +102,75 @@ def _session_from_dict(data: dict) -> UploadSession:
     )
 
 
+def _db_upsert(session: UploadSession) -> None:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        row = db.get(UploadChunkSession, session.session_id)
+        if row is None:
+            row = UploadChunkSession(
+                id=session.session_id,
+                filename=session.filename,
+                size=session.size,
+                project_id=session.project_id,
+                folder_id=session.folder_id,
+                total_parts=session.total_parts,
+            )
+            db.add(row)
+        row.received_parts_json = json.dumps(sorted(session.received_parts))
+        row.part_urls_json = json.dumps({str(k): v for k, v in session.part_urls.items()})
+        db.commit()
+
+
+def _db_load(session_id: str) -> UploadSession:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        row = db.get(UploadChunkSession, session_id)
+        if row is None:
+            raise FileNotFoundError(f"Upload session not found: {session_id}")
+
+        created = row.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created > SESSION_TTL:
+            db.delete(row)
+            db.commit()
+            raise FileNotFoundError(f"Upload session expired: {session_id}")
+
+        return UploadSession(
+            session_id=row.id,
+            filename=row.filename,
+            size=row.size,
+            project_id=row.project_id,
+            total_parts=row.total_parts,
+            folder_id=row.folder_id,
+            received_parts=set(json.loads(row.received_parts_json or "[]")),
+            part_urls={int(k): v for k, v in json.loads(row.part_urls_json or "{}").items()},
+        )
+
+
+def _db_delete(session_id: str) -> None:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        row = db.get(UploadChunkSession, session_id)
+        if row:
+            db.delete(row)
+            db.commit()
+
+
 def _save_session(session: UploadSession) -> None:
-    payload = json.dumps(_session_to_dict(session), ensure_ascii=False).encode("utf-8")
-    if _use_blob_chunks():
-        put_bytes(session._meta_blob_path(), payload, content_type="application/json")
+    if _use_db_sessions():
+        _db_upsert(session)
         return
 
     session.dir.mkdir(parents=True, exist_ok=True)
-    session.meta_path().write_bytes(payload)
+    session.meta_path().write_bytes(
+        json.dumps(_session_to_dict(session), ensure_ascii=False).encode("utf-8")
+    )
 
 
 def _load_session(session_id: str) -> UploadSession:
-    if _use_blob_chunks():
-        try:
-            meta_url = public_blob_url(f"chunks/{session_id}/meta.json")
-            data = json.loads(fetch_bytes(meta_url).decode("utf-8"))
-            return _session_from_dict(data)
-        except Exception as exc:
-            raise FileNotFoundError(f"Upload session not found: {session_id}") from exc
+    if _use_db_sessions():
+        return _db_load(session_id)
 
     meta_path = _sessions_root() / session_id / "meta.json"
     if not meta_path.exists():
@@ -115,13 +178,6 @@ def _load_session(session_id: str) -> UploadSession:
 
     data = json.loads(meta_path.read_text(encoding="utf-8"))
     return _session_from_dict(data)
-
-
-def _cache_session_locally(session: UploadSession) -> None:
-    session.dir.mkdir(parents=True, exist_ok=True)
-    session.meta_path().write_bytes(
-        json.dumps(_session_to_dict(session), ensure_ascii=False).encode("utf-8")
-    )
 
 
 def create_session(
@@ -136,6 +192,11 @@ def create_session(
             f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)"
         )
 
+    if _use_blob_parts() and not blob_enabled():
+        raise RuntimeError(
+            "BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID+VERCEL_OIDC_TOKEN required for uploads on Vercel"
+        )
+
     total_parts = max(1, (size + CHUNK_SIZE_BYTES - 1) // CHUNK_SIZE_BYTES)
     session = UploadSession(
         session_id=str(uuid.uuid4()),
@@ -147,7 +208,6 @@ def create_session(
         received_parts=set(),
     )
     _save_session(session)
-    _cache_session_locally(session)
     return session
 
 
@@ -164,7 +224,7 @@ def save_part(session_id: str, part: int, content: bytes) -> UploadSession:
     if len(content) > max_part_size + 1024:
         raise ValueError(f"Chunk {part} too large: {len(content)} bytes")
 
-    if _use_blob_chunks():
+    if _use_blob_parts():
         result = put_bytes(
             session._part_blob_path(part),
             content,
@@ -177,7 +237,6 @@ def save_part(session_id: str, part: int, content: bytes) -> UploadSession:
 
     session.received_parts.add(part)
     _save_session(session)
-    _cache_session_locally(session)
     return session
 
 
@@ -187,7 +246,7 @@ def merge_session(session_id: str) -> tuple[str | Path, UploadSession]:
     if missing:
         raise ValueError(f"Missing chunks: {missing[:5]}")
 
-    if _use_blob_chunks():
+    if _use_blob_parts():
         merged = bytearray()
         for part in range(session.total_parts):
             url = session.part_urls.get(part)
@@ -228,6 +287,8 @@ def merge_session(session_id: str) -> tuple[str | Path, UploadSession]:
 
 
 def cleanup_session(session_id: str) -> None:
+    if _use_db_sessions():
+        _db_delete(session_id)
     session_dir = _sessions_root() / session_id
     if session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)

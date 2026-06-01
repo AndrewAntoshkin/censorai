@@ -230,6 +230,11 @@ async def init_chunk_upload(data: ChunkUploadInitRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=413, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Chunk upload init failed")
+        raise HTTPException(status_code=500, detail=f"Upload init failed: {e}") from e
 
     return ChunkUploadInitResponse(
         session_id=session.session_id,
