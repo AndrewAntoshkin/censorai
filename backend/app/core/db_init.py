@@ -118,8 +118,10 @@ def _init_sync() -> None:
             _migrate_columns()
 
             from app.services.seed_bundle import ensure_demo_seeded
+            from app.services.legal_registry import registry_status
 
             ensure_demo_seeded()
+            registry_status()
             _initialized = True
             db_kind = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
             logger.info("Database initialized (%s)", db_kind)
