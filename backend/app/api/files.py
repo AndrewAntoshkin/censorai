@@ -13,15 +13,17 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.analysis import Analysis, Scene
-from app.models.project import VideoFile
+from app.models.project import Project, VideoFile
 from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
 from app.schemas.project import (
+    AssignProjectRequest,
     BlobUploadRequest,
     ChunkUploadInitRequest,
     ChunkUploadInitResponse,
     ChunkUploadStatusResponse,
     VideoFileResponse,
 )
+from app.services.project_buckets import is_system_project, resolve_project_id
 from app.services.chunk_upload_service import (
     chunk_size_bytes,
     cleanup_session,
@@ -209,14 +211,19 @@ async def _save_analysis_result(
 
 @router.post("/upload", response_model=VideoFileResponse, status_code=201)
 async def upload_file(
-    project_id: str,
     file: UploadFile,
+    project_id: str | None = Query(None),
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
+
+    try:
+        resolved_project_id = await resolve_project_id(db, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     content = await file.read()
     size_mb = len(content) / (1024 * 1024)
@@ -226,14 +233,16 @@ async def upload_file(
             detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
         )
 
-    storage_path = await storage_service.save_upload(project_id, file.filename, content)
+    storage_path = await storage_service.save_upload(
+        resolved_project_id, file.filename, content
+    )
 
     video = VideoFile(
         name=file.filename,
         size=len(content),
         status="uploaded",
         progress=100,
-        project_id=project_id,
+        project_id=resolved_project_id,
         folder_id=folder_id,
         storage_path=storage_path,
     )
@@ -249,12 +258,15 @@ async def upload_file(
 
 
 @router.post("/upload-chunks/init", response_model=ChunkUploadInitResponse, status_code=201)
-async def init_chunk_upload(data: ChunkUploadInitRequest):
+async def init_chunk_upload(
+    data: ChunkUploadInitRequest, db: AsyncSession = Depends(get_db)
+):
     try:
+        resolved_project_id = await resolve_project_id(db, data.project_id)
         session = create_session(
             filename=data.filename,
             size=data.size,
-            project_id=data.project_id,
+            project_id=resolved_project_id,
             folder_id=data.folder_id,
             duration_seconds=data.duration_seconds,
         )
@@ -451,12 +463,17 @@ async def complete_chunk_upload(
 
 @router.post("/from-blob", response_model=VideoFileResponse, status_code=201)
 async def register_from_blob(
-    project_id: str,
     data: BlobUploadRequest,
+    project_id: str | None = Query(None),
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        resolved_project_id = await resolve_project_id(db, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
     size_mb = data.size / (1024 * 1024)
     if size_mb > settings.UPLOAD_MAX_SIZE_MB:
         raise HTTPException(
@@ -469,7 +486,7 @@ async def register_from_blob(
         size=data.size,
         status="uploaded",
         progress=100,
-        project_id=project_id,
+        project_id=resolved_project_id,
         folder_id=folder_id,
         storage_path=data.blob_url,
     )
@@ -481,6 +498,43 @@ async def register_from_blob(
         await _kickoff_analysis(video, db)
         await db.refresh(video)
 
+    return video
+
+
+@router.patch("/{file_id}/project", response_model=VideoFileResponse)
+async def assign_file_to_project(
+    file_id: str,
+    data: AssignProjectRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if is_system_project(data.project_id):
+        raise HTTPException(status_code=400, detail="Invalid target project")
+
+    result = await db.execute(select(Project).where(Project.id == data.project_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await db.execute(
+        select(VideoFile)
+        .options(selectinload(VideoFile.analysis))
+        .where(VideoFile.id == file_id)
+    )
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if video.project_id == data.project_id:
+        return video
+
+    if video.storage_path:
+        video.storage_path = await storage_service.move_file_to_project(
+            video.storage_path, data.project_id
+        )
+
+    video.project_id = data.project_id
+    video.folder_id = None
+    await db.flush()
+    await db.refresh(video)
     return video
 
 

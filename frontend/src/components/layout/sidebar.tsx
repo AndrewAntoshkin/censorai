@@ -14,7 +14,7 @@ import {
   ChevronsUpDown,
   Film,
   Folder,
-  BookOpen,
+  FileText,
   HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,7 @@ import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 const navItems = [
   { icon: Home, label: "Главная", href: "/" },
   { icon: FolderOpen, label: "Проекты", href: "/projects" },
-  { icon: BookOpen, label: "Книги", href: "/books" },
+  { icon: FileText, label: "Отчёты", href: "/reports" },
   { icon: Search, label: "Поиск", href: "/search" },
 ];
 

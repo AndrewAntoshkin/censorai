@@ -32,16 +32,22 @@ function shouldUseChunkUpload(file: File): boolean {
   return true;
 }
 
+function uploadQuery(projectId?: string | null, extra?: Record<string, string>): string {
+  const params = new URLSearchParams({ auto_analyze: "1", ...extra });
+  if (projectId) params.set("project_id", projectId);
+  return params.toString();
+}
+
 async function uploadViaDirectPost(
   file: File,
-  projectId: string,
+  projectId: string | undefined,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   onProgress(5, "Загрузка на сервер…");
   const formData = new FormData();
   formData.append("file", file);
   const uploadRes = await fetch(
-    `${getApiBase()}/api/files/upload?project_id=${encodeURIComponent(projectId)}&auto_analyze=1`,
+    `${getApiBase()}/api/files/upload?${uploadQuery(projectId)}`,
     { method: "POST", body: formData }
   );
   if (!uploadRes.ok) {
@@ -185,13 +191,13 @@ async function uploadViaBlob(
 
 async function registerBlobAndAnalyze(
   file: File,
-  projectId: string,
+  projectId: string | undefined,
   blobUrl: string,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   onProgress(90, "Регистрация и запуск анализа…");
   const res = await fetch(
-    `${getApiBase()}/api/files/from-blob?project_id=${encodeURIComponent(projectId)}&auto_analyze=1`,
+    `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -212,7 +218,7 @@ async function registerBlobAndAnalyze(
 
 async function uploadViaChunks(
   file: File,
-  projectId: string,
+  projectId: string | undefined,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   const totalParts = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
@@ -227,7 +233,7 @@ async function uploadViaChunks(
     body: JSON.stringify({
       filename: file.name,
       size: file.size,
-      project_id: projectId,
+      ...(projectId ? { project_id: projectId } : {}),
       duration_seconds: durationSeconds,
     }),
   });
@@ -282,7 +288,7 @@ async function uploadViaChunks(
 
 export async function uploadFileToProject(
   file: File,
-  projectId: string,
+  projectId: string | undefined,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload()) {
@@ -318,15 +324,3 @@ export async function uploadFileToProject(
   return uploadViaDirectPost(file, projectId, onProgress);
 }
 
-export async function createUploadProject(): Promise<string> {
-  const res = await fetch(`${getApiBase()}/api/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: `Проект ${new Date().toLocaleDateString("ru-RU")}` }),
-  });
-  if (!res.ok) {
-    throw new Error("Не удалось создать проект");
-  }
-  const project = await res.json();
-  return project.id as string;
-}

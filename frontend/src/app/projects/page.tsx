@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { api, type ProjectAPI } from "@/lib/api";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -36,7 +38,12 @@ export default function ProjectsPage() {
               {projects.length} проектов
             </p>
           </div>
-          <Button variant="outline" size="lg" className="gap-1.5">
+          <Button
+            variant="outline"
+            size="lg"
+            className="gap-1.5"
+            onClick={() => setCreateOpen(true)}
+          >
             <Plus className="h-4 w-4" />
             Новый проект
           </Button>
@@ -79,6 +86,12 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
+
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(project) => setProjects((prev) => [project, ...prev])}
+      />
     </AppLayout>
   );
 }

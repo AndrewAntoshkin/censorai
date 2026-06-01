@@ -13,6 +13,7 @@ from app.schemas.project import (
     ProjectDetailResponse,
     ProjectResponse,
 )
+from app.services.project_buckets import UNASSIGNED_PROJECT_ID, is_system_project
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix=settings.route_prefix("/projects"), tags=["projects"])
@@ -24,6 +25,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
     stmt = (
         select(Project, func.count(VideoFile.id))
         .outerjoin(VideoFile, VideoFile.project_id == Project.id)
+        .where(Project.id != UNASSIGNED_PROJECT_ID)
         .group_by(Project.id)
         .order_by(Project.created_at.desc())
     )
@@ -47,6 +49,8 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
 
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
 async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
+    if is_system_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     result = await db.execute(
         select(Project)
         .options(
@@ -63,6 +67,8 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.delete("/{project_id}", status_code=204)
 async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
+    if is_system_project(project_id):
+        raise HTTPException(status_code=400, detail="Cannot delete system project")
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:

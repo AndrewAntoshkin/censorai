@@ -7,7 +7,7 @@ import { api, getApiBase, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { FileStatusBadge } from "@/components/shared/file-status-badge";
+import { ReportsList } from "@/components/reports/reports-list";
 
 export default function HomePage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -225,34 +225,16 @@ export default function HomePage() {
               )}
 
               {activeTab === "reports" && (
-                <div className="overflow-hidden rounded-xl border border-border bg-card">
-                  {recent.length === 0 && (
-                    <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-                      Пока нет готовых отчётов
-                    </div>
-                  )}
-                  {recent.map((file, i) => (
-                    <Link
-                      key={file.id}
-                      href={`/file/${file.id}`}
-                      className={cn(
-                        "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent",
-                        i > 0 && "border-t border-border"
-                      )}
-                    >
-                      <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate text-sm text-foreground">
-                        {file.name}
-                      </span>
-                      <FileStatusBadge
-                        status={file.status}
-                        progress={file.progress}
-                        riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
-                        className="ml-auto shrink-0"
-                      />
-                    </Link>
-                  ))}
-                </div>
+                <ReportsList
+                  files={recent}
+                  onProjectAssigned={(fileId, projectId) =>
+                    setRecent((prev) =>
+                      prev.map((f) =>
+                        f.id === fileId ? { ...f, project_id: projectId } : f
+                      )
+                    )
+                  }
+                />
               )}
             </section>
           </>

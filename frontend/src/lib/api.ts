@@ -245,6 +245,11 @@ export const api = {
     get: (id: string) => request<VideoFileAPI>(`/api/files/${id}`),
     recent: (limit = 12) =>
       request<VideoFileAPI[]>(`/api/files/recent?limit=${limit}`),
+    assignToProject: (fileId: string, projectId: string) =>
+      request<VideoFileAPI>(`/api/files/${fileId}/project`, {
+        method: "PATCH",
+        body: JSON.stringify({ project_id: projectId }),
+      }),
     getAnalysis: (id: string) =>
       request<AnalysisAPI>(`/api/files/${id}/analysis`),
     analyze: (id: string, options?: { force?: boolean }) => {

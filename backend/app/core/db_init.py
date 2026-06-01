@@ -14,6 +14,21 @@ _initialized = False
 _init_error: str | None = None
 
 
+def _ensure_unassigned_sync(sync_engine) -> None:
+    from sqlalchemy.orm import Session
+
+    from app.models.project import Project
+    from app.services.project_buckets import UNASSIGNED_PROJECT_ID, UNASSIGNED_PROJECT_NAME
+
+    with Session(sync_engine) as session:
+        if session.get(Project, UNASSIGNED_PROJECT_ID) is None:
+            session.add(
+                Project(id=UNASSIGNED_PROJECT_ID, name=UNASSIGNED_PROJECT_NAME)
+            )
+            session.commit()
+            logger.info("Created unassigned uploads project bucket")
+
+
 def _migrate_columns() -> None:
     import sqlalchemy as sa
 
@@ -113,6 +128,7 @@ def _init_sync() -> None:
                 connect_args=sync_connect_args,
             )
             Base.metadata.create_all(sync_engine)
+            _ensure_unassigned_sync(sync_engine)
             sync_engine.dispose()
 
             _migrate_columns()

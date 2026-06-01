@@ -56,9 +56,13 @@ class BlobUploadRequest(BaseModel):
 class ChunkUploadInitRequest(BaseModel):
     filename: str
     size: int
-    project_id: str
+    project_id: str | None = None
     folder_id: str | None = None
     duration_seconds: float | None = None
+
+
+class AssignProjectRequest(BaseModel):
+    project_id: str
 
 
 class ChunkUploadInitResponse(BaseModel):

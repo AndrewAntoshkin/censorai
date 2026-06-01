@@ -47,5 +47,21 @@ class StorageService:
         if project_dir.exists():
             shutil.rmtree(project_dir)
 
+    async def move_file_to_project(self, storage_path: str, project_id: str) -> str:
+        if storage_path.startswith(("http://", "https://")):
+            return storage_path
+
+        source = Path(storage_path)
+        if not source.is_file():
+            return storage_path
+
+        dest_dir = self.get_project_dir(project_id)
+        dest = dest_dir / source.name
+        if source.resolve() == dest.resolve():
+            return storage_path
+
+        shutil.move(str(source), str(dest))
+        return str(dest)
+
 
 storage_service = StorageService()

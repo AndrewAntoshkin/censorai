@@ -1,8 +1,4 @@
-import {
-  createUploadProject,
-  uploadFileToProject,
-  waitForAnalysis,
-} from "@/lib/upload-api";
+import { uploadFileToProject, waitForAnalysis } from "@/lib/upload-api";
 
 export const MAX_CONCURRENT_UPLOADS = 3;
 
@@ -128,24 +124,12 @@ async function runJob(jobId: string) {
   const job = jobs.find((j) => j.id === jobId);
   if (!job || job.status !== "pending") return;
 
-  let projectId = job.projectId;
-  if (!projectId) {
-    try {
-      projectId = await createUploadProject();
-      patchJob(jobId, { projectId });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      patchJob(jobId, { status: "error", error: message });
-      return;
-    }
-  }
-
   patchJob(jobId, { status: "uploading", progress: 5, statusHint: "Старт…" });
 
   try {
     const uploadedFile = await uploadFileToProject(
       job.file,
-      projectId,
+      job.projectId,
       (progress, hint) => patchJob(jobId, { progress, statusHint: hint })
     );
 
@@ -202,26 +186,20 @@ async function runJob(jobId: string) {
   }
 }
 
-/** Assign one project to a batch, then start up to MAX_CONCURRENT_UPLOADS workers. */
-export async function startUploadBatch(jobIds: string[]): Promise<void> {
+/** Start pending jobs (optional shared project for the whole batch). */
+export function startUploadBatch(
+  jobIds: string[],
+  projectId?: string | null
+): void {
   const pending = jobs.filter(
-    (j) => jobIds.includes(j.id) && j.status === "pending" && !j.projectId
+    (j) => jobIds.includes(j.id) && j.status === "pending"
   );
   if (pending.length === 0) return;
 
-  let projectId: string;
-  try {
-    projectId = await createUploadProject();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+  if (projectId) {
     for (const job of pending) {
-      patchJob(job.id, { status: "error", error: message });
+      patchJob(job.id, { projectId });
     }
-    return;
-  }
-
-  for (const job of pending) {
-    patchJob(job.id, { projectId });
   }
 
   pumpQueue();
