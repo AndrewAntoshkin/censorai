@@ -93,6 +93,9 @@ async function waitForAnalysis(
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+    if (statusRes.status >= 500) {
+      throw new Error("Ошибка сервера при проверке статуса анализа");
+    }
     if (!statusRes.ok) continue;
     const fileState = await statusRes.json();
     if (fileState.status === "analyzed") return;

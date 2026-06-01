@@ -102,7 +102,7 @@ async def analyze_book(book_id: str, db: AsyncSession = Depends(get_db)):
         video_file_id=book_id,
         video_title=gemini_result.video_title or book.name,
         duration=gemini_result.duration,
-        analyzed_at=datetime.now(timezone.utc),
+        analyzed_at=datetime.now(timezone.utc).replace(tzinfo=None),
         status="completed",
     )
     analysis.summary = summary

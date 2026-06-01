@@ -74,7 +74,13 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
     await db.flush()
 
 
+def _utc_naive_now() -> datetime:
+    """Naive UTC for Postgres TIMESTAMP WITHOUT TIME ZONE (asyncpg rejects tz-aware)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
+    file_id = video.id
     if video.status != "analyzing" or not video.replicate_prediction_id:
         return
 
@@ -128,10 +134,14 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
         await _save_analysis_result(video, db, result)
         video.replicate_prediction_id = None
     except Exception:
-        logger.exception("Failed to save analysis for file %s", video.id)
-        video.status = "error"
-        video.replicate_prediction_id = None
-        await db.flush()
+        await db.rollback()
+        logger.exception("Failed to save analysis for file %s", file_id)
+        row = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = row.scalar_one_or_none()
+        if video:
+            video.status = "error"
+            video.replicate_prediction_id = None
+            await db.flush()
 
 
 async def _save_analysis_result(
@@ -142,7 +152,7 @@ async def _save_analysis_result(
         video_file_id=video.id,
         video_title=gemini_result.video_title or video.name,
         duration=gemini_result.duration,
-        analyzed_at=datetime.now(timezone.utc),
+        analyzed_at=_utc_naive_now(),
         status="completed",
     )
     analysis.summary = summary
