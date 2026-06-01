@@ -107,7 +107,13 @@ async function waitForAnalysis(
 }
 
 function useBlobMultipart(file: File): boolean {
-  return !isLocalDev() || file.size >= BLOB_MULTIPART_THRESHOLD;
+  return file.size >= BLOB_MULTIPART_THRESHOLD;
+}
+
+function blobPathname(file: File): string {
+  const ext = file.name.includes(".") ? (file.name.split(".").pop() ?? "mp4") : "mp4";
+  const safeExt = ext.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "mp4";
+  return `videos/${crypto.randomUUID()}.${safeExt}`;
 }
 
 async function uploadViaBlob(
@@ -116,6 +122,7 @@ async function uploadViaBlob(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<{ url: string }> {
   const { upload } = await import("@vercel/blob/client");
+  const pathname = blobPathname(file);
   const useMultipart = useBlobMultipart(file);
 
   onProgress(5, useMultipart ? "Подготовка частей…" : "Подключение к хранилищу…");
@@ -125,19 +132,19 @@ async function uploadViaBlob(
   const heartbeat = setInterval(() => {
     const sec = Math.round((Date.now() - startedAt) / 1000);
     if (lastPercent === 0 && sec >= 8) {
-      onProgress(5, `Ожидание ответа от хранилища… ${sec} сек`);
+      onProgress(5, `Ожидание ответа от хранилища… ${sec} сек (проверьте интернет)`);
     }
   }, 3000);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
-  try {
-    return await upload(file.name, file, {
+  const runUpload = (multipart: boolean) =>
+    upload(pathname, file, {
       access: "public",
       contentType: file.type || "video/mp4",
       handleUploadUrl: uploadUrl,
-      multipart: useMultipart,
+      multipart,
       abortSignal: controller.signal,
       onUploadProgress: ({ percentage }) => {
         lastPercent = percentage;
@@ -147,6 +154,17 @@ async function uploadViaBlob(
         );
       },
     });
+
+  try {
+    if (!useMultipart) {
+      return await runUpload(false);
+    }
+    try {
+      return await runUpload(true);
+    } catch {
+      onProgress(3, "Повтор без multipart…");
+      return await runUpload(false);
+    }
   } catch (err) {
     if (controller.signal.aborted) {
       throw new Error("Загрузка заняла слишком много времени. Попробуйте снова.");

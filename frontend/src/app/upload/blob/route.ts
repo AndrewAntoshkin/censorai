@@ -2,7 +2,7 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<NextResponse> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -34,6 +34,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         maximumSizeInBytes: 500 * 1024 * 1024,
         addRandomSuffix: true,
       }),
+      onUploadCompleted: async ({ blob }) => {
+        // Required for client upload() to finish; DB registration happens in from-blob.
+        console.log("Blob client upload completed:", blob.url);
+      },
     });
     return NextResponse.json(jsonResponse);
   } catch (error) {
