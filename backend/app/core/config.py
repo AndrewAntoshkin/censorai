@@ -57,8 +57,7 @@ class Settings(BaseSettings):
 
     GEMINI_MAX_CONCURRENT: int = 3
 
-    # Files larger than this use Blob URL or signed /replicate-media (not base64 inline).
-    INLINE_VIDEO_MAX_MB: int = 4
+    INLINE_VIDEO_MAX_MB: int = 100
     REPLICATE_MEDIA_TTL_SECONDS: int = 7200
     PUBLIC_API_BASE_URL: str = _default_public_api_base()
     REPLICATE_MAX_VIDEO_MINUTES: int = 45

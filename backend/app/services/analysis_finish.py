@@ -58,7 +58,7 @@ async def _bump_progress(file_id: str, db: AsyncSession) -> None:
     video = row.scalar_one_or_none()
     if not video or video.status != "analyzing" or video.analysis_id:
         return
-    video.progress = min(98, (video.progress or 0) + 2)
+    video.progress = min(95, (video.progress or 0) + 5)
     await db.flush()
 
 

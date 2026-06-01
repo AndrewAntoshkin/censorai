@@ -102,26 +102,17 @@ def _init_sync() -> None:
 
         try:
             import app.models  # noqa: F401
-            import sqlalchemy as sa
 
-            sync_connect_args: dict = {}
-            if "sqlite" in settings.DATABASE_URL_SYNC:
-                sync_connect_args = {"check_same_thread": False}
+            async def _create() -> None:
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
 
-            sync_engine = sa.create_engine(
-                settings.DATABASE_URL_SYNC,
-                connect_args=sync_connect_args,
-            )
-            Base.metadata.create_all(sync_engine)
-            sync_engine.dispose()
-
+            asyncio.run(_create())
             _migrate_columns()
 
             from app.services.seed_bundle import ensure_demo_seeded
-            from app.services.legal_registry import registry_status
 
             ensure_demo_seeded()
-            registry_status()
             _initialized = True
             db_kind = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
             logger.info("Database initialized (%s)", db_kind)

@@ -16,7 +16,6 @@ from app.services.analysis_coverage import (
 )
 from app.services.analysis_prompts import VIDEO_ANALYSIS_PROMPT
 from app.services.replicate_media import build_replicate_media_url
-from app.services.video_media import effective_size_bytes
 from app.schemas.analysis import GeminiAnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -128,9 +127,7 @@ class GeminiService:
         if not path.exists():
             raise FileNotFoundError(f"Video not found: {storage_path}")
 
-        size_bytes = effective_size_bytes(storage_path, file_size)
-        if size_bytes <= 0 and path.exists():
-            size_bytes = path.stat().st_size
+        size_bytes = file_size if file_size is not None else path.stat().st_size
         size_mb = size_bytes / (1024 * 1024)
 
         if size_mb <= settings.INLINE_VIDEO_MAX_MB:

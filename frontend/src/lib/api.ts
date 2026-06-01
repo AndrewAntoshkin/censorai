@@ -17,11 +17,7 @@ export function getApiBase(): string {
   ) {
     return "";
   }
-  // Same origin + next.config rewrites → /api/* проксируется на uvicorn :8000
-  if (typeof window !== "undefined") {
-    return "";
-  }
-  return process.env.BACKEND_URL || "http://127.0.0.1:8000";
+  return "http://localhost:8000";
 }
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
@@ -104,8 +100,6 @@ export interface AnalysisSummaryAPI {
   entities?: EntityAPI[];
   markings_detected?: MarkingAPI[];
   compliance_checks?: ComplianceCheckAPI[];
-  registry_verifications?: RegistryVerificationAPI[];
-  legal_disclaimer?: string;
   incomplete_coverage?: boolean;
   incomplete_coverage_note?: string;
 }
@@ -116,24 +110,6 @@ export interface ComplianceCheckAPI {
   status: string;
   findings_count: number;
   note?: string;
-  articles?: string[];
-  registry_source?: string;
-}
-
-export interface RegistryVerificationAPI {
-  name: string;
-  type?: string;
-  scene_number?: number;
-  context?: string;
-  registry?: string | null;
-  registry_status: string;
-  matched_registry_name?: string | null;
-  law?: string | null;
-  article?: string | null;
-  severity?: string;
-  required_marking?: string | null;
-  marking_found?: boolean | null;
-  source_url?: string;
 }
 
 export interface AgeRatingTriggerAPI {
@@ -149,12 +125,6 @@ export interface EntityAPI {
   name?: string;
   scene_number?: number;
   context?: string;
-  registry?: string | null;
-  registry_status?: string;
-  matched_registry_name?: string | null;
-  law?: string | null;
-  article?: string | null;
-  severity?: string;
 }
 
 export interface MarkingAPI {

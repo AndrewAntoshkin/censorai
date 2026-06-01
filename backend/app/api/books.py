@@ -15,7 +15,6 @@ from app.models.analysis import Analysis, Scene
 from app.models.project import Project, VideoFile
 from app.schemas.analysis import AnalysisResponse
 from app.services.docx_service import generate_report
-from app.services.legal_compliance import enrich_analysis_summary
 from app.services.storage_service import storage_service
 from app.services.text_analysis_service import text_analysis_service
 
@@ -170,8 +169,6 @@ async def get_book_analysis(book_id: str, db: AsyncSession = Depends(get_db)):
     analysis = analysis_result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    if analysis.summary:
-        analysis.summary = enrich_analysis_summary(dict(analysis.summary))
     return analysis
 
 
@@ -192,8 +189,6 @@ async def download_book_report(book_id: str, db: AsyncSession = Depends(get_db))
     analysis = analysis_result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    if analysis.summary:
-        analysis.summary = enrich_analysis_summary(dict(analysis.summary))
 
     analysis_response = AnalysisResponse.model_validate(analysis)
     docx_bytes = generate_report(analysis_response)
@@ -241,18 +236,10 @@ def _build_summary_dict(gemini_result) -> dict:
                 elif r.risk_level == "warning":
                     warning += 1
 
-    summary: dict = {
+    return {
         "total_scenes": total,
         "risky_scenes": risky,
         "risk_categories": categories,
         "critical_count": critical,
         "warning_count": warning,
     }
-    if gemini_result.entities:
-        summary["entities"] = [e.model_dump(exclude_none=True) for e in gemini_result.entities]
-    if gemini_result.markings_detected:
-        summary["markings_detected"] = [
-            m.model_dump(exclude_none=True) for m in gemini_result.markings_detected
-        ]
-    enrich_analysis_summary(summary, gemini_result)
-    return summary

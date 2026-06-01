@@ -37,8 +37,6 @@ def _normalize_sync_url(raw: str) -> str:
     url = _clean_neon_url(raw.strip())
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
-    if url.startswith("sqlite+aiosqlite://"):
-        return url.replace("sqlite+aiosqlite://", "sqlite://", 1)
     if url.startswith("postgresql+asyncpg://"):
         return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
     if url.startswith("postgresql://"):
@@ -51,11 +49,6 @@ def resolve_database_env() -> None:
 
     def _get(name: str) -> str:
         return os.getenv(name, "").strip()
-
-    async_url = _get("DATABASE_URL")
-    sync_url = _get("DATABASE_URL_SYNC")
-    if async_url and sync_url and "sqlite" in async_url and "sqlite" in sync_url:
-        return
 
     raw = (
         _get("DATABASE_URL")
