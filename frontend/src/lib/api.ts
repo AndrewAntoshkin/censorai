@@ -100,6 +100,8 @@ export interface AnalysisSummaryAPI {
   entities?: EntityAPI[];
   markings_detected?: MarkingAPI[];
   compliance_checks?: ComplianceCheckAPI[];
+  incomplete_coverage?: boolean;
+  incomplete_coverage_note?: string;
 }
 
 export interface ComplianceCheckAPI {
@@ -215,11 +217,15 @@ export const api = {
       request<VideoFileAPI[]>(`/api/files/recent?limit=${limit}`),
     getAnalysis: (id: string) =>
       request<AnalysisAPI>(`/api/files/${id}/analysis`),
-    analyze: (id: string) => {
+    analyze: (id: string, options?: { force?: boolean }) => {
       if (DEMO_MODE) {
         return Promise.reject(new Error("Анализ недоступен в демо на GitHub Pages"));
       }
-      return request<AnalysisAPI>(`/api/files/${id}/analyze`, { method: "POST" });
+      const qs = options?.force ? "?force=true" : "";
+      return request<AnalysisAPI | { status: string; file_id: string }>(
+        `/api/files/${id}/analyze${qs}`,
+        { method: "POST" }
+      );
     },
     getReportUrl: (id: string) => `${getApiBase()}/api/files/${id}/report`,
     upload: async (

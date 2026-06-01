@@ -95,6 +95,48 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
+function AgeRatingRecommendation({
+  summary,
+}: {
+  summary: NonNullable<AnalysisAPI["summary"]>;
+}) {
+  if (!summary.recommended_age_rating && !summary.age_rating_reason) {
+    return null;
+  }
+
+  return (
+    <div className="mb-6 rounded-xl border border-warning/30 bg-warning/5 p-5">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Рекомендация по рейтингу (triage)
+      </p>
+      {summary.recommended_age_rating && (
+        <p className="text-2xl font-semibold tabular-nums text-foreground">
+          {summary.recommended_age_rating}
+        </p>
+      )}
+      {summary.age_rating_reason && (
+        <p className="mt-2 text-sm text-foreground">{summary.age_rating_reason}</p>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Не юридический вердикт — требует проверки редактором
+      </p>
+      {summary.age_rating_triggers && summary.age_rating_triggers.length > 0 && (
+        <ul className="mt-4 space-y-2 border-t border-warning/20 pt-4 text-sm text-foreground">
+          {summary.age_rating_triggers.map((t, i) => (
+            <li key={i}>
+              <span className="font-medium">
+                Сцена {t.scene_number ?? "?"} ({t.start_time ?? "?"}):
+              </span>{" "}
+              {RISK_LABELS[t.trigger ?? ""] || t.trigger}
+              {t.reason ? ` — ${t.reason}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SceneCard({ scene }: { scene: SceneAPI }) {
   const accent = scene.risk_level ? riskLevelStyle(scene.risk_level) : null;
   return (
@@ -167,24 +209,108 @@ interface AnalysisViewProps {
   fileId: string;
 }
 
+function parseDurationSeconds(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parts = value.trim().split(":");
+  if (parts.length === 2) {
+    return Number(parts[0]) * 60 + Number(parts[1]);
+  }
+  if (parts.length === 3) {
+    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  }
+  return null;
+}
+
+function looksIncomplete(
+  summary: AnalysisAPI["summary"],
+  analysis: AnalysisAPI,
+  fileSizeBytes: number | null
+): boolean {
+  if (summary?.incomplete_coverage) return true;
+  const title = (analysis.video_title || "").toLowerCase();
+  if (title.includes("фрагмент")) return true;
+  const sizeMb = (fileSizeBytes ?? 0) / (1024 * 1024);
+  const reported = parseDurationSeconds(analysis.duration);
+  if (sizeMb >= 35 && reported !== null && reported < 12 * 60) return true;
+  return false;
+}
+
+function IncompleteCoverageBanner({
+  note,
+  onRetry,
+  retrying,
+}: {
+  note: string;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  return (
+    <div className="mb-6 rounded-xl border border-critical/40 bg-critical/5 p-4">
+      <p className="text-sm font-medium text-critical">Неполный анализ</p>
+      <p className="mt-1 text-sm text-foreground">{note}</p>
+      <Button className="mt-3" size="sm" disabled={retrying} onClick={onRetry}>
+        {retrying ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Перезапуск…
+          </>
+        ) : (
+          "Перезапустить анализ"
+        )}
+      </Button>
+    </div>
+  );
+}
+
 export function AnalysisView({ fileId }: AnalysisViewProps) {
   const [analysis, setAnalysis] = useState<AnalysisAPI | null>(null);
+  const [fileSize, setFileSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
-    api.files
-      .getAnalysis(fileId)
-      .then((data) => active && setAnalysis(data))
+    Promise.all([api.files.getAnalysis(fileId), api.files.get(fileId)])
+      .then(([data, file]) => {
+        if (!active) return;
+        setAnalysis(data);
+        setFileSize(file.size);
+      })
       .catch((err) => active && setError(err.message))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
   }, [fileId]);
+
+  const handleRetryAnalysis = async () => {
+    setRetrying(true);
+    setError(null);
+    try {
+      await api.files.analyze(fileId, { force: true });
+      const deadline = Date.now() + 60 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10000));
+        const file = await api.files.get(fileId);
+        if (file.status === "analyzed") {
+          const data = await api.files.getAnalysis(fileId);
+          setAnalysis(data);
+          return;
+        }
+        if (file.status === "error") {
+          throw new Error("Анализ завершился с ошибкой");
+        }
+      }
+      throw new Error("Превышено время ожидания анализа");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось перезапустить анализ");
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -209,6 +335,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
   const violationScenes = analysis.scenes.filter((s) => s.risk);
   const summary = analysis.summary;
+  const incomplete = looksIncomplete(summary, analysis, fileSize);
 
   return (
     <AppLayout
@@ -252,39 +379,6 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
               {summary && (
                 <>
-                  {(summary.recommended_age_rating || summary.age_rating_reason) && (
-                    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Рекомендация по рейтингу (triage)
-                      </p>
-                      {summary.recommended_age_rating && (
-                        <p className="text-lg font-semibold tabular-nums text-foreground">
-                          {summary.recommended_age_rating}
-                        </p>
-                      )}
-                      {summary.age_rating_reason && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {summary.age_rating_reason}
-                        </p>
-                      )}
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        Не юридический вердикт — требует проверки редактором
-                      </p>
-                      {summary.age_rating_triggers &&
-                        summary.age_rating_triggers.length > 0 && (
-                          <ul className="mt-2 space-y-1 text-xs text-foreground">
-                            {summary.age_rating_triggers.map((t, i) => (
-                              <li key={i}>
-                                Сцена {t.scene_number ?? "?"} ({t.start_time ?? "?"}):{" "}
-                                {RISK_LABELS[t.trigger ?? ""] || t.trigger}
-                                {t.reason ? ` — ${t.reason}` : ""}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                    </div>
-                  )}
-
                   {summary.compliance_checks &&
                     summary.compliance_checks.length > 0 && (
                       <div className="border-t border-border pt-4">
@@ -457,6 +551,18 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
           </aside>
 
           <div className="min-w-0 flex-1">
+            {incomplete && (
+              <IncompleteCoverageBanner
+                note={
+                  summary?.incomplete_coverage_note ||
+                  "Похоже, проанализировано только начало видео (модель пометила результат как «фрагмент»). Перезапустите анализ — сейчас включён полный лимит ответа."
+                }
+                onRetry={handleRetryAnalysis}
+                retrying={retrying}
+              />
+            )}
+            {summary && <AgeRatingRecommendation summary={summary} />}
+
             <h3 className="mb-4 text-sm font-semibold text-foreground">
               Нарушения ({violationScenes.length})
             </h3>

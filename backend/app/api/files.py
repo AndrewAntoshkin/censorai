@@ -80,6 +80,46 @@ def _utc_naive_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _parse_timecode_seconds(value: str | None) -> int | None:
+    if not value:
+        return None
+    parts = value.strip().split(":")
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(float(parts[1]))
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(float(parts[2]))
+    except ValueError:
+        return None
+    return None
+
+
+def _looks_like_incomplete_coverage(
+    file_size_bytes: int,
+    duration_str: str | None,
+    video_title: str | None,
+    gemini_result: GeminiAnalysisResult,
+) -> bool:
+    """Heuristic: large uploads should not report only a few minutes analyzed."""
+    title = (video_title or "").lower()
+    if "фрагмент" in title:
+        return True
+
+    reported = _parse_timecode_seconds(duration_str)
+    last_end = 0
+    for scene in gemini_result.scenes:
+        end = _parse_timecode_seconds(scene.end_time)
+        if end is not None:
+            last_end = max(last_end, end)
+
+    size_mb = file_size_bytes / (1024 * 1024)
+    if size_mb >= 35 and reported is not None and reported < 12 * 60:
+        return True
+    if size_mb >= 35 and last_end > 0 and last_end < 12 * 60:
+        return True
+    return False
+
+
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
     await maybe_finish_analysis(video, db, save_result=_save_analysis_result)
 
@@ -87,7 +127,7 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
 async def _save_analysis_result(
     video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
 ) -> Analysis:
-    summary = _build_summary_dict(gemini_result)
+    summary = _build_summary_dict(gemini_result, file_size_bytes=video.size or 0)
     analysis = Analysis(
         video_file_id=video.id,
         video_title=gemini_result.video_title or video.name,
@@ -469,7 +509,11 @@ async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{file_id}/analyze")
-async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
+async def analyze_file(
+    file_id: str,
+    force: bool = Query(False, description="Re-run analysis even if already completed"),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(VideoFile).where(VideoFile.id == file_id)
     )
@@ -480,7 +524,7 @@ async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
 
-    if video.status == "analyzed" and video.analysis_id:
+    if not force and video.status == "analyzed" and video.analysis_id:
         analysis_result = await db.execute(
             select(Analysis)
             .options(selectinload(Analysis.scenes))
@@ -626,7 +670,7 @@ def _compliance_matrix(
     ]
 
 
-def _build_summary_dict(gemini_result) -> dict:
+def _build_summary_dict(gemini_result, *, file_size_bytes: int = 0) -> dict:
     scenes_with_risks = [gs for gs in gemini_result.scenes if gs.risks]
     total_reviewed = gemini_result.total_scenes_reviewed or len(gemini_result.scenes)
     risky_scene_numbers = {gs.scene_number for gs in scenes_with_risks}
@@ -672,5 +716,17 @@ def _build_summary_dict(gemini_result) -> dict:
         len(gemini_result.markings_detected or []),
         gemini_result.recommended_age_rating,
     )
+
+    if _looks_like_incomplete_coverage(
+        file_size_bytes,
+        gemini_result.duration,
+        gemini_result.video_title,
+        gemini_result,
+    ):
+        summary["incomplete_coverage"] = True
+        summary["incomplete_coverage_note"] = (
+            "Модель обработала только начало файла. Загрузите серию заново "
+            "или нажмите «Перезапустить анализ» — на сервере включён полный лимит ответа."
+        )
 
     return summary
