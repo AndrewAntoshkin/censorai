@@ -285,6 +285,67 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                     </div>
                   )}
 
+                  {summary.compliance_checks &&
+                    summary.compliance_checks.length > 0 && (
+                      <div className="border-t border-border pt-4">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Нормативная проверка (РФ, 2026)
+                        </p>
+                        <ul className="space-y-1.5">
+                          {summary.compliance_checks.map((c, i) => {
+                            const tone =
+                              c.status === "ok"
+                                ? "text-success"
+                                : c.status === "review"
+                                  ? "text-primary"
+                                  : "text-warning";
+                            const dot =
+                              c.status === "ok"
+                                ? "bg-success"
+                                : c.status === "review"
+                                  ? "bg-primary"
+                                  : "bg-warning";
+                            return (
+                              <li
+                                key={i}
+                                className="rounded-md border border-border bg-card p-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-semibold text-foreground">
+                                    {c.law}
+                                  </span>
+                                  <span
+                                    className={`flex items-center gap-1 text-[11px] font-medium ${tone}`}
+                                  >
+                                    <span
+                                      className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`}
+                                    />
+                                    {c.status === "ok"
+                                      ? "соответствует"
+                                      : c.status === "review"
+                                        ? "на проверку"
+                                        : "внимание"}
+                                    {c.findings_count > 0 ? ` · ${c.findings_count}` : ""}
+                                  </span>
+                                </div>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                  {c.title}
+                                </p>
+                                {c.note && (
+                                  <p className="mt-0.5 text-[11px] text-foreground/80">
+                                    {c.note}
+                                  </p>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Triage-проверка, не юридическое заключение.
+                        </p>
+                      </div>
+                    )}
+
                   {summary.entities && summary.entities.length > 0 && (
                     <div className="border-t border-border pt-4">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">

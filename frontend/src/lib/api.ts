@@ -99,6 +99,15 @@ export interface AnalysisSummaryAPI {
   age_rating_triggers?: AgeRatingTriggerAPI[];
   entities?: EntityAPI[];
   markings_detected?: MarkingAPI[];
+  compliance_checks?: ComplianceCheckAPI[];
+}
+
+export interface ComplianceCheckAPI {
+  law: string;
+  title: string;
+  status: string;
+  findings_count: number;
+  note?: string;
 }
 
 export interface AgeRatingTriggerAPI {

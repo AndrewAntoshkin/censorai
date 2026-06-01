@@ -278,6 +278,70 @@ async def blob_selftest():
     return info
 
 
+@router.post("/import-analysis")
+async def import_analysis(request: Request, db: AsyncSession = Depends(get_db)):
+    """One-time demo import: insert a precomputed analysis (with compliance matrix)."""
+    from app.models.project import Project
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    res = await db.execute(select(Project).where(Project.name.like("%Демо%")))
+    proj = res.scalars().first()
+    if not proj:
+        res = await db.execute(select(Project))
+        proj = res.scalars().first()
+    if not proj:
+        raise HTTPException(status_code=400, detail="no project to attach to")
+
+    video = VideoFile(
+        name=payload["video_title"],
+        size=payload.get("size", 0),
+        status="analyzed",
+        progress=100,
+        project_id=proj.id,
+        storage_path=payload.get("storage_path", "demo/episode.mp4"),
+    )
+    db.add(video)
+    await db.flush()
+
+    analysis = Analysis(
+        video_file_id=video.id,
+        video_title=payload["video_title"],
+        duration=payload.get("duration"),
+        analyzed_at=_utc_naive_now(),
+        status="completed",
+    )
+    analysis.summary = payload["summary"]
+    db.add(analysis)
+    await db.flush()
+
+    for s in payload.get("scenes", []):
+        for r in s.get("risks") or []:
+            db.add(
+                Scene(
+                    analysis_id=analysis.id,
+                    scene_number=s["scene_number"],
+                    start_time=s.get("start_time"),
+                    end_time=s.get("end_time"),
+                    description=s.get("description"),
+                    risk=r.get("risk"),
+                    mode=r.get("mode"),
+                    risk_level=r.get("risk_level"),
+                    probability=r.get("probability"),
+                    reason=r.get("reason"),
+                    quote=r.get("quote"),
+                    text_in_frame=r.get("text_in_frame"),
+                    recommendation=r.get("recommendation"),
+                )
+            )
+    video.analysis_id = analysis.id
+    await db.flush()
+    await db.commit()
+    return {"file_id": video.id, "project_id": proj.id}
+
+
 @router.put("/upload-chunks/{session_id}/parts/{part}")
 async def upload_chunk(session_id: str, part: int, request: Request):
     content = await request.body()
