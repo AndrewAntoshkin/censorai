@@ -1,0 +1,8 @@
+{
+  "updated_at": "2026-06-01T14:35:30.980091+00:00",
+  "foreign_agents_source": "https://minjust.gov.ru/ru/activity/directions/998/",
+  "foreign_agents_mirror": "https://raw.githubusercontent.com/fz255/foreign-agents/main/registry.json",
+  "extremist_orgs_source": "https://minjust.gov.ru/",
+  "foreign_agents_count": 655,
+  "extremist_orgs_count": 0
+}

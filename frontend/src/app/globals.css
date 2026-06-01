@@ -200,4 +200,12 @@
   .scrollbar-quiet::-webkit-scrollbar-thumb:hover {
     background-color: var(--muted-foreground);
   }
+
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
 }

@@ -38,6 +38,8 @@ from app.services.analysis_finish import maybe_finish_analysis
 from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
 from app.services.storage_service import storage_service
+from app.services.legal_compliance import enrich_analysis_summary
+from app.services.video_media import ensure_public_video_url
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
     video.replicate_prediction_id = None
     await db.flush()
 
+    await ensure_public_video_url(video, db)
     prediction_id = await asyncio.to_thread(
         gemini_service.start_analysis,
         video.storage_path,
@@ -88,6 +91,7 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
     await db.flush()
 
     try:
+        await ensure_public_video_url(video, db)
         prediction_id = await asyncio.to_thread(
             gemini_service.start_analysis,
             video.storage_path,
@@ -113,6 +117,20 @@ def _utc_naive_now() -> datetime:
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
+    if (
+        video.status == "analyzing"
+        and not video.replicate_prediction_id
+        and video.storage_path
+    ):
+        logger.warning(
+            "Analysis for %s has no Replicate prediction id; restarting",
+            video.id,
+        )
+        try:
+            await _kickoff_analysis(video, db)
+        except Exception:
+            logger.exception("Failed to recover analysis for %s", video.id)
+            return
     await maybe_finish_analysis(video, db, save_result=_save_analysis_result)
 
 
@@ -246,6 +264,25 @@ async def init_chunk_upload(data: ChunkUploadInitRequest):
         chunk_size=chunk_size_bytes(),
         total_parts=session.total_parts,
     )
+
+
+@router.post("/blob-cleanup")
+async def blob_cleanup(request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete blob objects except videos linked to status=analyzed files."""
+    from app.services.blob_cleanup import prune_blob_storage
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    dry_run = bool(payload.get("dry_run"))
+    try:
+        return await prune_blob_storage(db, dry_run=dry_run)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Blob cleanup failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/blob-selftest")
@@ -521,6 +558,8 @@ async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
     analysis = analysis_result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.summary:
+        analysis.summary = enrich_analysis_summary(dict(analysis.summary))
     return analysis
 
 
@@ -632,6 +671,8 @@ async def download_report(file_id: str, db: AsyncSession = Depends(get_db)):
     analysis = analysis_result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.summary:
+        analysis.summary = enrich_analysis_summary(dict(analysis.summary))
 
     analysis_response = AnalysisResponse.model_validate(analysis)
     docx_bytes = generate_report(analysis_response)
@@ -646,50 +687,6 @@ async def download_report(file_id: str, db: AsyncSession = Depends(get_db)):
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
         },
     )
-
-
-_CONTENT_436 = {
-    "violence", "illegal_actions", "profanity", "alcohol", "smoking",
-    "sexual_content", "drugs", "weapons", "excessive_cruelty",
-    "crime_glorification", "animal_cruelty", "suicide",
-}
-
-
-def _compliance_matrix(
-    categories: dict, n_entities: int, n_markings: int, age: str | None
-) -> list[dict]:
-    """Per-law triage matrix (RF legislation). Not a legal opinion."""
-    n_436 = sum(v for k, v in categories.items() if k in _CONTENT_436)
-    n_fa = categories.get("foreign_agent", 0)
-    n_lgbt = (
-        categories.get("lgbt_propaganda", 0)
-        + categories.get("gender_change_propaganda", 0)
-        + categories.get("childfree_propaganda", 0)
-    )
-    n_ext = (
-        categories.get("forbidden_symbols", 0)
-        + categories.get("banned_extremist_org", 0)
-        + categories.get("terrorism", 0)
-    )
-    age_txt = age or "не определён"
-    return [
-        {"law": "436-ФЗ", "title": "Защита детей от вредной информации (возрастная маркировка)",
-         "status": "attention" if n_436 else "ok", "findings_count": n_436,
-         "note": f"Рекомендованный ценз {age_txt}. Контент-категорий, влияющих на ценз: {n_436}."},
-        {"law": "149-ФЗ ст.10.5", "title": "Обязанности аудиовизуального сервиса (маркировка)",
-         "status": "ok" if n_markings else "attention", "findings_count": n_markings,
-         "note": "Маркировки в кадре обнаружены." if n_markings
-                 else "Возрастная плашка в кадре не обнаружена — проверить наличие."},
-        {"law": "255-ФЗ", "title": "Иностранные агенты (маркировка)",
-         "status": "review" if (n_entities or n_fa) else "ok", "findings_count": n_entities,
-         "note": f"Авто-флагов иноагента: {n_fa}. {n_entities} сущностей требуют сверки с реестром Минюста (не вердикт)."},
-        {"law": "КоАП 6.21", "title": "Пропаганда НТО / смены пола / отказа от деторождения",
-         "status": "attention" if n_lgbt else "ok", "findings_count": n_lgbt,
-         "note": "Не выявлено." if not n_lgbt else "Признаки выявлены — требует лингвистической экспертизы (triage)."},
-        {"law": "114-ФЗ", "title": "Противодействие экстремизму (символика, запр. организации)",
-         "status": "attention" if n_ext else "ok", "findings_count": n_ext,
-         "note": "Не выявлено." if not n_ext else "Признаки выявлены — требует проверки."},
-    ]
 
 
 def _build_summary_dict(
@@ -737,12 +734,7 @@ def _build_summary_dict(
             m.model_dump(exclude_none=True) for m in gemini_result.markings_detected
         ]
 
-    summary["compliance_checks"] = _compliance_matrix(
-        categories,
-        len(gemini_result.entities or []),
-        len(gemini_result.markings_detected or []),
-        gemini_result.recommended_age_rating,
-    )
+    enrich_analysis_summary(summary, gemini_result)
 
     if is_incomplete_coverage(
         file_size_bytes,

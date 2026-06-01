@@ -35,3 +35,4 @@ backend/eval/*.log
 
 # Claude local
 .claude/
+.vercel
