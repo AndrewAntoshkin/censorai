@@ -1,63 +1,27 @@
-"""Server-side Vercel Blob uploads (no browser → blob CDN)."""
+"""Server-side Vercel Blob uploads via the official vercel_blob SDK.
+
+The previous hand-rolled HTTP client targeted the wrong endpoint
+(https://vercel.com/api/blob) and every upload failed with 500. We now delegate
+to the maintained vercel_blob package, which uses the correct Blob API base URL,
+version and headers, and only needs BLOB_READ_WRITE_TOKEN.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
-from urllib.parse import quote
 
 import httpx
+import vercel_blob
 
 logger = logging.getLogger(__name__)
 
-BLOB_API = "https://vercel.com/api/blob"
-API_VERSION = "12"
+# Use multipart for larger payloads (merged videos) to avoid single-request limits.
+_MULTIPART_THRESHOLD = 8 * 1024 * 1024
 
 
 def blob_enabled() -> bool:
-    return bool(
-        os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
-        or (
-            os.getenv("VERCEL_OIDC_TOKEN", "").strip()
-            and os.getenv("BLOB_STORE_ID", "").strip()
-        )
-    )
-
-
-def _normalize_store_id(store_id: str) -> str:
-    return store_id.removeprefix("store_").strip()
-
-
-def _store_id() -> str:
-    explicit = os.getenv("BLOB_STORE_ID", "").strip()
-    if explicit:
-        return _normalize_store_id(explicit)
-
-    token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
-    if token.startswith("vercel_blob_rw_"):
-        rest = token[len("vercel_blob_rw_") :]
-        return _normalize_store_id(rest.split("_", 1)[0])
-
-    parts = token.split("_")
-    if len(parts) > 3:
-        return _normalize_store_id(parts[3])
-    return ""
-
-
-def _auth_headers() -> tuple[str, str]:
-    """Return (authorization bearer value, store_id)."""
-    store_id = _store_id()
-    if not store_id:
-        raise RuntimeError("BLOB_STORE_ID not configured")
-
-    oidc = os.getenv("VERCEL_OIDC_TOKEN", "").strip()
-    if oidc:
-        return oidc, store_id
-
-    token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("BLOB_READ_WRITE_TOKEN not configured")
-    return token, store_id
+    return bool(os.getenv("BLOB_READ_WRITE_TOKEN", "").strip())
 
 
 def put_bytes(
@@ -67,31 +31,21 @@ def put_bytes(
     content_type: str = "application/octet-stream",
     add_random_suffix: bool = False,
 ) -> dict:
-    auth, store_id = _auth_headers()
-    params = f"?pathname={quote(pathname, safe='')}"
-    headers = {
-        "authorization": f"Bearer {auth}",
-        "x-api-version": API_VERSION,
-        "x-content-length": str(len(data)),
-        "x-vercel-blob-access": "public",
-        "x-content-type": content_type,
-        "x-add-random-suffix": "1" if add_random_suffix else "0",
-        "x-allow-overwrite": "1",
-        "x-vercel-blob-store-id": store_id,
+    """Upload bytes to Vercel Blob (public access). Returns API response with 'url'.
+
+    content_type is accepted for call-site compatibility; vercel_blob infers the
+    MIME type from the pathname extension (parts -> octet-stream, *.mp4 -> video/mp4).
+    """
+    options = {
+        "addRandomSuffix": "true" if add_random_suffix else "false",
+        "allowOverwrite": "true",
     }
-    url = f"{BLOB_API}/{params}"
-    with httpx.Client(timeout=600) as client:
-        response = client.put(url, content=data, headers=headers)
-    if not response.is_success:
-        logger.error(
-            "Blob put failed %s %s: %s",
-            response.status_code,
-            pathname,
-            response.text[:500],
-        )
-        response.raise_for_status()
-    result = response.json()
-    logger.info("Blob put %s -> %s (%d bytes)", pathname, result.get("url"), len(data))
+    multipart = len(data) > _MULTIPART_THRESHOLD
+    result = vercel_blob.put(pathname, data, options, multipart=multipart)
+    url = result.get("url") if isinstance(result, dict) else None
+    if not url:
+        raise RuntimeError(f"Blob put returned no url for {pathname}: {result!r}")
+    logger.info("Blob put %s -> %s (%d bytes)", pathname, url, len(data))
     return result
 
 
