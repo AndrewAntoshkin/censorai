@@ -181,6 +181,7 @@ class GeminiService:
         *,
         file_id: str | None = None,
         file_size: int | None = None,
+        expected_duration_seconds: int | None = None,
     ) -> str:
         """Start Replicate prediction without blocking (for serverless)."""
         video_uri = self.resolve_video_uri(
@@ -188,7 +189,9 @@ class GeminiService:
         )
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,
-            input=self._model_input(video_uri),
+            input=self._model_input(
+                video_uri, expected_duration_seconds=expected_duration_seconds
+            ),
         )
         return prediction.id
 
