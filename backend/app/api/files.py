@@ -30,6 +30,7 @@ from app.services.chunk_upload_service import (
     save_part,
 )
 from app.services.docx_service import generate_report
+from app.services.analysis_finish import maybe_finish_analysis
 from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
 from app.services.storage_service import storage_service
@@ -80,85 +81,7 @@ def _utc_naive_now() -> datetime:
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
-    file_id = video.id
-    if video.status != "analyzing" or not video.replicate_prediction_id:
-        return
-
-    # The frontend polls this file every few seconds and Vercel may run those
-    # requests on parallel instances. Without a guard, several of them race to
-    # poll + save the same analysis, deadlocking on Neon and timing out (500).
-    # Take a row lock; if another request already holds it, skip silently.
-    locked = (
-        await db.execute(
-            select(VideoFile)
-            .where(VideoFile.id == file_id)
-            .with_for_update(skip_locked=True)
-        )
-    ).scalar_one_or_none()
-    if locked is None:
-        return
-    video = locked
-    if video.status != "analyzing" or not video.replicate_prediction_id:
-        return
-
-    try:
-        _status, result = await asyncio.to_thread(
-            gemini_service.poll_prediction, video.replicate_prediction_id
-        )
-    except Exception as exc:
-        err = str(exc).lower()
-        if (
-            ("interrupted" in err or "code: pa" in err)
-            and video.storage_path
-            and video.progress < 90
-        ):
-            path_ok = video.storage_path.startswith(("http://", "https://")) or Path(
-                video.storage_path
-            ).exists()
-            if not path_ok:
-                logger.error(
-                    "Replicate PA but video file missing on this instance for %s",
-                    video.id,
-                )
-            else:
-                logger.warning("Replicate interrupted, retrying analysis for file %s", video.id)
-                try:
-                    prediction_id = await asyncio.to_thread(
-                        gemini_service.start_analysis,
-                        video.storage_path,
-                        file_id=video.id,
-                        file_size=video.size,
-                    )
-                    video.replicate_prediction_id = prediction_id
-                    video.progress = min(video.progress + 10, 85)
-                    await db.flush()
-                    return
-                except Exception:
-                    logger.exception("Retry failed for file %s", video.id)
-
-        logger.exception("Poll failed for file %s", video.id)
-        video.status = "error"
-        video.replicate_prediction_id = None
-        await db.flush()
-        return
-
-    if result is None:
-        video.progress = min(95, video.progress + 5)
-        await db.flush()
-        return
-
-    try:
-        await _save_analysis_result(video, db, result)
-        video.replicate_prediction_id = None
-    except Exception:
-        await db.rollback()
-        logger.exception("Failed to save analysis for file %s", file_id)
-        row = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
-        video = row.scalar_one_or_none()
-        if video:
-            video.status = "error"
-            video.replicate_prediction_id = None
-            await db.flush()
+    await maybe_finish_analysis(video, db, save_result=_save_analysis_result)
 
 
 async def _save_analysis_result(
@@ -573,6 +496,8 @@ async def analyze_file(file_id: str, db: AsyncSession = Depends(get_db)):
 
     video.status = "analyzing"
     video.progress = 10
+    video.analysis_id = None
+    video.replicate_prediction_id = None
     await db.flush()
 
     try:

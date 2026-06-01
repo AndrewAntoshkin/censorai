@@ -29,9 +29,15 @@ def _is_transient_replicate_error(exc: Exception) -> bool:
 
 class GeminiService:
     def __init__(self) -> None:
+        token = settings.REPLICATE_API_TOKEN
+        # Long timeout for create/wait paths; status polls must stay short on serverless.
         self._client = replicate.Client(
-            api_token=settings.REPLICATE_API_TOKEN,
+            api_token=token,
             timeout=httpx.Timeout(300, connect=30),
+        )
+        self._poll_client = replicate.Client(
+            api_token=token,
+            timeout=httpx.Timeout(45, connect=15),
         )
         self._semaphore = asyncio.Semaphore(settings.GEMINI_MAX_CONCURRENT)
 
@@ -181,7 +187,7 @@ class GeminiService:
 
     def poll_prediction(self, prediction_id: str) -> tuple[str, GeminiAnalysisResult | None]:
         """Poll once. Returns (status, result) where result is set when succeeded."""
-        prediction = self._client.predictions.get(prediction_id)
+        prediction = self._poll_client.predictions.get(prediction_id)
         status = prediction.status
 
         if status in {"starting", "processing"}:

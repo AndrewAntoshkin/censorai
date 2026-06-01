@@ -15,7 +15,17 @@ _uses_null_pool = False
 if "sqlite" in settings.DATABASE_URL:
     connect_args = {"check_same_thread": False}
 elif "postgres" in settings.DATABASE_URL:
-    connect_args = {"ssl": "require", "statement_cache_size": 0}
+    connect_args = {
+        "ssl": "require",
+        "statement_cache_size": 0,
+        # Abort any query that runs longer than 20s so a hung request frees its
+        # Neon connection instead of holding it until the 60s function timeout —
+        # which otherwise exhausts the connection pool and degrades the whole API.
+        "server_settings": {
+            "statement_timeout": "20000",
+            "lock_timeout": "5000",
+        },
+    }
     if os.getenv("VERCEL"):
         engine_kwargs["poolclass"] = NullPool
         _uses_null_pool = True

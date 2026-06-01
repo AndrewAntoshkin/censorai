@@ -91,7 +91,8 @@ async function waitForAnalysis(
 
   const deadline = Date.now() + 60 * 60 * 1000;
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 5000));
+    // 10s reduces parallel Vercel/Neon load while Replicate runs (minutes).
+    await new Promise((r) => setTimeout(r, 10000));
     const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
     if (statusRes.status >= 500) {
       throw new Error("Ошибка сервера при проверке статуса анализа");
