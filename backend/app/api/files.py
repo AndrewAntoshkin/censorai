@@ -266,10 +266,13 @@ async def complete_chunk_upload(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        merged_path, session = merge_session(session_id)
-        storage_path = await storage_service.save_upload_from_path(
-            session.project_id, session.filename, merged_path
-        )
+        merged_result, session = merge_session(session_id)
+        if isinstance(merged_result, str) and merged_result.startswith(("http://", "https://")):
+            storage_path = merged_result
+        else:
+            storage_path = await storage_service.save_upload_from_path(
+                session.project_id, session.filename, Path(merged_result)
+            )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:

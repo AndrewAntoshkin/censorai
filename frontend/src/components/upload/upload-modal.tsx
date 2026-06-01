@@ -55,11 +55,13 @@ function isLocalDev(): boolean {
 }
 
 function shouldUseBlobUpload(): boolean {
-  return !isLocalDev();
+  // Browser → Blob CDN often blocked or hangs; use API chunks + server-side Blob put on Vercel.
+  return false;
 }
 
 function shouldUseChunkUpload(file: File): boolean {
-  return isLocalDev() && file.size > DIRECT_UPLOAD_LIMIT;
+  if (!isLocalDev()) return true;
+  return file.size > DIRECT_UPLOAD_LIMIT;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -260,7 +262,7 @@ async function uploadViaChunks(
     onProgress(percent, `Загрузка на сервер… ${part + 1}/${totalParts}`);
   }
 
-  onProgress(90, "Сборка файла…");
+  onProgress(90, "Сборка файла и запуск анализа…");
   const completeRes = await fetch(
     `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
     { method: "POST" }

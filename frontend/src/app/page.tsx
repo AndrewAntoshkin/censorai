@@ -20,14 +20,32 @@ export default function HomePage() {
     let active = true;
 
     async function loadHome() {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+
       try {
-        let [p, r] = await Promise.all([api.projects.list(), api.files.recent(12)]);
+        let [p, r] = await Promise.all([
+          fetch(`${getApiBase()}/api/projects`, { signal: controller.signal }).then((res) =>
+            res.ok ? res.json() : []
+          ),
+          fetch(`${getApiBase()}/api/files/recent?limit=12`, { signal: controller.signal }).then(
+            (res) => (res.ok ? res.json() : [])
+          ),
+        ]);
 
         if (p.length === 0 && r.length === 0) {
           await fetch(`${getApiBase()}/api/seed-demo`, {
             method: "POST",
+            signal: controller.signal,
           }).catch(() => null);
-          [p, r] = await Promise.all([api.projects.list(), api.files.recent(12)]);
+          [p, r] = await Promise.all([
+            fetch(`${getApiBase()}/api/projects`, { signal: controller.signal }).then((res) =>
+              res.ok ? res.json() : []
+            ),
+            fetch(`${getApiBase()}/api/files/recent?limit=12`, { signal: controller.signal }).then(
+              (res) => (res.ok ? res.json() : [])
+            ),
+          ]);
         }
 
         if (!active) return;
@@ -36,6 +54,7 @@ export default function HomePage() {
       } catch {
         // keep empty state
       } finally {
+        clearTimeout(timeout);
         if (active) setLoading(false);
       }
     }
