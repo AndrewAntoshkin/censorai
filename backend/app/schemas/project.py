@@ -58,6 +58,7 @@ class ChunkUploadInitRequest(BaseModel):
     size: int
     project_id: str
     folder_id: str | None = None
+    duration_seconds: float | None = None
 
 
 class ChunkUploadInitResponse(BaseModel):

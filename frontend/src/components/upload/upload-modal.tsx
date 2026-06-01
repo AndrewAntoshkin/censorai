@@ -64,6 +64,23 @@ function shouldUseChunkUpload(file: File): boolean {
   return file.size > DIRECT_UPLOAD_LIMIT;
 }
 
+function readVideoDurationSeconds(file: File): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(video.duration) ? video.duration : undefined);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(undefined);
+    };
+    video.src = url;
+  });
+}
+
 const STATUS_LABELS: Record<string, string> = {
   pending: "Готов к загрузке",
   uploading: "Загрузка…",
@@ -224,6 +241,8 @@ async function uploadViaChunks(
 
   onProgress(3, "Подготовка загрузки…");
 
+  const durationSeconds = await readVideoDurationSeconds(file);
+
   const initRes = await fetch(`${getApiBase()}/api/files/upload-chunks/init`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -231,6 +250,7 @@ async function uploadViaChunks(
       filename: file.name,
       size: file.size,
       project_id: projectId,
+      duration_seconds: durationSeconds,
     }),
   });
   if (!initRes.ok) {

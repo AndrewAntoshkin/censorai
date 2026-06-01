@@ -92,7 +92,9 @@ async def _persist_result(
         return
 
     try:
-        await save_result(video, db, result)
+        saved = await save_result(video, db, result)
+        if saved is None:
+            return
         video.replicate_prediction_id = None
     except Exception:
         logger.exception("Failed to save analysis for file %s; will retry on next poll", file_id)
@@ -124,11 +126,16 @@ async def _handle_poll_error(
             locked = row.scalar_one_or_none()
             if locked and locked.status == "analyzing":
                 try:
+                    from app.services.analysis_coverage import expected_duration_seconds
+
                     new_id = await asyncio.to_thread(
                         gemini_service.start_analysis,
                         locked.storage_path,
                         file_id=locked.id,
                         file_size=locked.size,
+                        expected_duration_seconds=expected_duration_seconds(
+                            locked.size or 0, locked.duration_seconds
+                        ),
                     )
                     locked.replicate_prediction_id = new_id
                     locked.progress = min((locked.progress or 0) + 10, 85)

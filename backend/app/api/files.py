@@ -30,6 +30,10 @@ from app.services.chunk_upload_service import (
     save_part,
 )
 from app.services.docx_service import generate_report
+from app.services.analysis_coverage import (
+    expected_duration_seconds,
+    is_incomplete_coverage,
+)
 from app.services.analysis_finish import maybe_finish_analysis
 from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
@@ -38,6 +42,32 @@ from app.services.storage_service import storage_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=settings.route_prefix("/files"), tags=["files"])
+
+
+def _expected_duration(video: VideoFile) -> int | None:
+    return expected_duration_seconds(video.size or 0, video.duration_seconds)
+
+
+async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
+    """Start a new Replicate run when the previous output did not cover the full file."""
+    if not video.storage_path:
+        return
+    video.status = "analyzing"
+    video.progress = max(25, video.progress or 0)
+    video.analysis_id = None
+    video.replicate_prediction_id = None
+    await db.flush()
+
+    prediction_id = await asyncio.to_thread(
+        gemini_service.start_analysis,
+        video.storage_path,
+        file_id=video.id,
+        file_size=video.size,
+        expected_duration_seconds=_expected_duration(video),
+    )
+    video.replicate_prediction_id = prediction_id
+    video.progress = min((video.progress or 0) + 5, 85)
+    await db.flush()
 
 
 async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
@@ -54,6 +84,7 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
 
     video.status = "analyzing"
     video.progress = 20
+    video.analysis_attempts = 0
     await db.flush()
 
     try:
@@ -62,6 +93,7 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
             video.storage_path,
             file_id=video.id,
             file_size=video.size,
+            expected_duration_seconds=_expected_duration(video),
         )
     except Exception as exc:
         logger.exception("Failed to start analysis for file %s", video.id)
@@ -80,54 +112,36 @@ def _utc_naive_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _parse_timecode_seconds(value: str | None) -> int | None:
-    if not value:
-        return None
-    parts = value.strip().split(":")
-    try:
-        if len(parts) == 2:
-            return int(parts[0]) * 60 + int(float(parts[1]))
-        if len(parts) == 3:
-            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(float(parts[2]))
-    except ValueError:
-        return None
-    return None
-
-
-def _looks_like_incomplete_coverage(
-    file_size_bytes: int,
-    duration_str: str | None,
-    video_title: str | None,
-    gemini_result: GeminiAnalysisResult,
-) -> bool:
-    """Heuristic: large uploads should not report only a few minutes analyzed."""
-    title = (video_title or "").lower()
-    if "фрагмент" in title:
-        return True
-
-    reported = _parse_timecode_seconds(duration_str)
-    last_end = 0
-    for scene in gemini_result.scenes:
-        end = _parse_timecode_seconds(scene.end_time)
-        if end is not None:
-            last_end = max(last_end, end)
-
-    size_mb = file_size_bytes / (1024 * 1024)
-    if size_mb >= 35 and reported is not None and reported < 12 * 60:
-        return True
-    if size_mb >= 35 and last_end > 0 and last_end < 12 * 60:
-        return True
-    return False
-
-
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
     await maybe_finish_analysis(video, db, save_result=_save_analysis_result)
 
 
 async def _save_analysis_result(
     video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
-) -> Analysis:
-    summary = _build_summary_dict(gemini_result, file_size_bytes=video.size or 0)
+) -> Analysis | None:
+    expected = _expected_duration(video)
+    if is_incomplete_coverage(
+        video.size or 0,
+        gemini_result,
+        expected_seconds=expected,
+    ):
+        attempts = video.analysis_attempts or 0
+        if attempts < settings.ANALYSIS_MAX_COVERAGE_RETRIES:
+            video.analysis_attempts = attempts + 1
+            logger.warning(
+                "Incomplete analysis for %s (attempt %d/%d), restarting",
+                video.id,
+                video.analysis_attempts,
+                settings.ANALYSIS_MAX_COVERAGE_RETRIES,
+            )
+            await _restart_full_analysis(video, db)
+            return None
+
+    summary = _build_summary_dict(
+        gemini_result,
+        file_size_bytes=video.size or 0,
+        expected_seconds=expected,
+    )
     analysis = Analysis(
         video_file_id=video.id,
         video_title=gemini_result.video_title or video.name,
@@ -217,6 +231,7 @@ async def init_chunk_upload(data: ChunkUploadInitRequest):
             size=data.size,
             project_id=data.project_id,
             folder_id=data.folder_id,
+            duration_seconds=data.duration_seconds,
         )
     except ValueError as e:
         raise HTTPException(status_code=413, detail=str(e)) from e
@@ -377,6 +392,7 @@ async def complete_chunk_upload(
         project_id=session.project_id,
         folder_id=session.folder_id,
         storage_path=storage_path,
+        duration_seconds=session.duration_seconds,
     )
     db.add(video)
     await db.flush()
@@ -532,7 +548,11 @@ async def analyze_file(
         )
         return analysis_result.scalar_one()
 
-    if video.status == "analyzing" and video.replicate_prediction_id:
+    if (
+        not force
+        and video.status == "analyzing"
+        and video.replicate_prediction_id
+    ):
         return JSONResponse(
             status_code=202,
             content={"status": "analyzing", "file_id": file_id},
@@ -542,6 +562,8 @@ async def analyze_file(
     video.progress = 10
     video.analysis_id = None
     video.replicate_prediction_id = None
+    if force:
+        video.analysis_attempts = 0
     await db.flush()
 
     try:
@@ -670,7 +692,12 @@ def _compliance_matrix(
     ]
 
 
-def _build_summary_dict(gemini_result, *, file_size_bytes: int = 0) -> dict:
+def _build_summary_dict(
+    gemini_result,
+    *,
+    file_size_bytes: int = 0,
+    expected_seconds: int | None = None,
+) -> dict:
     scenes_with_risks = [gs for gs in gemini_result.scenes if gs.risks]
     total_reviewed = gemini_result.total_scenes_reviewed or len(gemini_result.scenes)
     risky_scene_numbers = {gs.scene_number for gs in scenes_with_risks}
@@ -717,16 +744,15 @@ def _build_summary_dict(gemini_result, *, file_size_bytes: int = 0) -> dict:
         gemini_result.recommended_age_rating,
     )
 
-    if _looks_like_incomplete_coverage(
+    if is_incomplete_coverage(
         file_size_bytes,
-        gemini_result.duration,
-        gemini_result.video_title,
         gemini_result,
+        expected_seconds=expected_seconds,
     ):
         summary["incomplete_coverage"] = True
         summary["incomplete_coverage_note"] = (
-            "Модель обработала только начало файла. Загрузите серию заново "
-            "или нажмите «Перезапустить анализ» — на сервере включён полный лимит ответа."
+            "Модель обработала только часть файла после нескольких попыток. "
+            "Нажмите «Перезапустить анализ» или загрузите файл снова."
         )
 
     return summary

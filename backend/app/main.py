@@ -59,6 +59,7 @@ async def health_check():
             "has_postgres_url": bool(os.getenv("POSTGRES_URL", "").strip()),
             "has_storage_url": bool(os.getenv("STORAGE_URL", "").strip()),
             "replicate_max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
+            "analysis_max_coverage_retries": settings.ANALYSIS_MAX_COVERAGE_RETRIES,
         },
         "db": database_status(),
     }

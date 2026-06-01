@@ -56,6 +56,8 @@ class VideoFile(Base):
     folder_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     replicate_prediction_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    analysis_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     analysis_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("analyses.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -34,6 +34,7 @@ class UploadSession:
     folder_id: str | None
     received_parts: set[int]
     part_urls: dict[int, str] = field(default_factory=dict)
+    duration_seconds: float | None = None
 
     @property
     def dir(self) -> Path:
@@ -80,6 +81,7 @@ def _session_to_dict(session: UploadSession) -> dict:
         "total_parts": session.total_parts,
         "received_parts": sorted(session.received_parts),
         "part_urls": {str(k): v for k, v in session.part_urls.items()},
+        "duration_seconds": session.duration_seconds,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -99,6 +101,7 @@ def _session_from_dict(data: dict) -> UploadSession:
         folder_id=data.get("folder_id"),
         received_parts=set(data.get("received_parts", [])),
         part_urls=part_urls,
+        duration_seconds=data.get("duration_seconds"),
     )
 
 
@@ -118,6 +121,7 @@ def _db_upsert(session: UploadSession) -> None:
             db.add(row)
         row.received_parts_json = json.dumps(sorted(session.received_parts))
         row.part_urls_json = json.dumps({str(k): v for k, v in session.part_urls.items()})
+        row.duration_seconds = session.duration_seconds
         db.commit()
 
 
@@ -145,6 +149,7 @@ def _db_load(session_id: str) -> UploadSession:
             folder_id=row.folder_id,
             received_parts=set(json.loads(row.received_parts_json or "[]")),
             part_urls={int(k): v for k, v in json.loads(row.part_urls_json or "{}").items()},
+            duration_seconds=row.duration_seconds,
         )
 
 
@@ -185,6 +190,7 @@ def create_session(
     size: int,
     project_id: str,
     folder_id: str | None = None,
+    duration_seconds: float | None = None,
 ) -> UploadSession:
     size_mb = size / (1024 * 1024)
     if size_mb > settings.UPLOAD_MAX_SIZE_MB:
@@ -206,6 +212,7 @@ def create_session(
         total_parts=total_parts,
         folder_id=folder_id,
         received_parts=set(),
+        duration_seconds=duration_seconds,
     )
     _save_session(session)
     return session

@@ -46,6 +46,17 @@ def _migrate_columns() -> None:
             if "mode" not in scene_cols:
                 conn.execute(sa.text("ALTER TABLE scenes ADD COLUMN mode VARCHAR(50)"))
                 logger.info("Added scenes.mode column")
+            if "duration_seconds" not in video_cols:
+                conn.execute(sa.text("ALTER TABLE video_files ADD COLUMN duration_seconds REAL"))
+                logger.info("Added video_files.duration_seconds column")
+            if "analysis_attempts" not in video_cols:
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE video_files ADD COLUMN analysis_attempts "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+                logger.info("Added video_files.analysis_attempts column")
         else:
             conn.execute(
                 sa.text(
@@ -56,7 +67,28 @@ def _migrate_columns() -> None:
             conn.execute(
                 sa.text("ALTER TABLE scenes ADD COLUMN IF NOT EXISTS mode VARCHAR(50)")
             )
-            logger.info("Ensured video_files.replicate_prediction_id and scenes.mode columns")
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE video_files ADD COLUMN IF NOT EXISTS "
+                    "duration_seconds DOUBLE PRECISION"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE video_files ADD COLUMN IF NOT EXISTS "
+                    "analysis_attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE upload_chunk_sessions ADD COLUMN IF NOT EXISTS "
+                    "duration_seconds DOUBLE PRECISION"
+                )
+            )
+            logger.info(
+                "Ensured video_files.replicate_prediction_id, duration_seconds, "
+                "analysis_attempts and scenes.mode columns"
+            )
 
 
 def _init_sync() -> None:

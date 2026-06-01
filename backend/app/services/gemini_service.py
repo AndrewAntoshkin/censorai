@@ -10,6 +10,10 @@ import httpx
 import replicate
 
 from app.core.config import settings
+from app.services.analysis_coverage import (
+    FULL_ANALYSIS_MAX_OUTPUT_TOKENS,
+    full_coverage_prompt_suffix,
+)
 from app.services.analysis_prompts import VIDEO_ANALYSIS_PROMPT
 from app.services.replicate_media import build_replicate_media_url
 from app.schemas.analysis import GeminiAnalysisResult
@@ -156,12 +160,15 @@ class GeminiService:
         encoded = base64.b64encode(raw).decode("ascii")
         return f"data:{content_type};base64,{encoded}"
 
-    def _model_input(self, video_url: str) -> dict:
+    def _model_input(
+        self, video_url: str, *, expected_duration_seconds: int | None = None
+    ) -> dict:
+        prompt = ANALYSIS_PROMPT + full_coverage_prompt_suffix(expected_duration_seconds)
         payload = {
-            "prompt": ANALYSIS_PROMPT,
+            "prompt": prompt,
             "videos": [video_url],
             "video_fps": settings.REPLICATE_VIDEO_FPS,
-            "max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
+            "max_output_tokens": FULL_ANALYSIS_MAX_OUTPUT_TOKENS,
             "temperature": 0.2,
         }
         if settings.REPLICATE_THINKING_LEVEL and settings.REPLICATE_THINKING_LEVEL != "none":
