@@ -78,6 +78,26 @@ def delete_urls(urls: list[str]) -> None:
             logger.exception("Blob delete failed for batch of %d url(s)", len(batch))
 
 
+def list_all_blobs() -> list[dict]:
+    """List every object in the store (paginated)."""
+    if not blob_enabled():
+        return []
+    items: list[dict] = []
+    cursor: str | None = None
+    while True:
+        options: dict = {"limit": 1000, "mode": "expanded"}
+        if cursor:
+            options["cursor"] = cursor
+        page = vercel_blob.list(options, timeout=120)
+        items.extend(page.get("blobs") or [])
+        if not page.get("hasMore"):
+            break
+        cursor = page.get("cursor")
+        if not cursor:
+            break
+    return items
+
+
 def delete_blob_url(url: str | None) -> bool:
     if not blob_enabled() or not is_vercel_blob_url(url):
         return False
