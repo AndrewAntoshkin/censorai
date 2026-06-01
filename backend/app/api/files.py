@@ -243,6 +243,31 @@ async def init_chunk_upload(data: ChunkUploadInitRequest):
     )
 
 
+@router.post("/blob-selftest")
+async def blob_selftest():
+    """Diagnostic: attempt a tiny Blob upload and report the exact outcome/env."""
+    import os
+
+    from app.services.blob_storage import blob_enabled, put_bytes
+
+    info = {
+        "blob_enabled": blob_enabled(),
+        "has_rw_token": bool(os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()),
+        "has_store_id": bool(os.getenv("BLOB_STORE_ID", "").strip()),
+        "has_oidc": bool(os.getenv("VERCEL_OIDC_TOKEN", "").strip()),
+    }
+    try:
+        result = await asyncio.to_thread(
+            put_bytes, "selftest/probe.txt", b"hello", add_random_suffix=True
+        )
+        info["ok"] = True
+        info["url"] = result.get("url") if isinstance(result, dict) else str(result)
+    except Exception as e:
+        info["ok"] = False
+        info["error"] = f"{type(e).__name__}: {e}"
+    return info
+
+
 @router.put("/upload-chunks/{session_id}/parts/{part}")
 async def upload_chunk(session_id: str, part: int, request: Request):
     content = await request.body()
@@ -255,6 +280,11 @@ async def upload_chunk(session_id: str, part: int, request: Request):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Chunk save failed: session=%s part=%s", session_id, part)
+        raise HTTPException(
+            status_code=500, detail=f"chunk save failed: {type(e).__name__}: {e}"
+        ) from e
 
     return ChunkUploadStatusResponse(
         session_id=session.session_id,
