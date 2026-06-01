@@ -84,6 +84,23 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
     if video.status != "analyzing" or not video.replicate_prediction_id:
         return
 
+    # The frontend polls this file every few seconds and Vercel may run those
+    # requests on parallel instances. Without a guard, several of them race to
+    # poll + save the same analysis, deadlocking on Neon and timing out (500).
+    # Take a row lock; if another request already holds it, skip silently.
+    locked = (
+        await db.execute(
+            select(VideoFile)
+            .where(VideoFile.id == file_id)
+            .with_for_update(skip_locked=True)
+        )
+    ).scalar_one_or_none()
+    if locked is None:
+        return
+    video = locked
+    if video.status != "analyzing" or not video.replicate_prediction_id:
+        return
+
     try:
         _status, result = await asyncio.to_thread(
             gemini_service.poll_prediction, video.replicate_prediction_id
@@ -475,8 +492,20 @@ async def get_file(file_id: str, db: AsyncSession = Depends(get_db)):
     if not video:
         raise HTTPException(status_code=404, detail="File not found")
 
-    await _maybe_finish_analysis(video, db)
-    await db.refresh(video)
+    try:
+        await _maybe_finish_analysis(video, db)
+        await db.refresh(video)
+    except Exception:
+        logger.exception("finish-check failed for %s; returning current state", file_id)
+        await db.rollback()
+        result = await db.execute(
+            select(VideoFile)
+            .options(selectinload(VideoFile.analysis))
+            .where(VideoFile.id == file_id)
+        )
+        video = result.scalar_one_or_none()
+        if not video:
+            raise HTTPException(status_code=404, detail="File not found")
     return video
 
 
@@ -489,8 +518,16 @@ async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
     if not video:
         raise HTTPException(status_code=404, detail="File not found")
 
-    await _maybe_finish_analysis(video, db)
-    await db.refresh(video)
+    try:
+        await _maybe_finish_analysis(video, db)
+        await db.refresh(video)
+    except Exception:
+        logger.exception("finish-check failed for %s; returning current state", file_id)
+        await db.rollback()
+        result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = result.scalar_one_or_none()
+        if not video:
+            raise HTTPException(status_code=404, detail="File not found")
 
     if not video.analysis_id:
         if video.status == "analyzing":
