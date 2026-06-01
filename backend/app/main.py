@@ -73,6 +73,13 @@ async def health_check():
     return payload
 
 
+@app.get(settings.route_prefix("/legal/registries"))
+async def legal_registries_status():
+    from app.services.legal_registry import registry_status
+
+    return registry_status()
+
+
 @app.post(settings.route_prefix("/seed-demo"))
 async def seed_demo():
     import asyncio

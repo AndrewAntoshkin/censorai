@@ -402,7 +402,7 @@ export default function BooksPage() {
         {status === "done" && analysis && (
           <div className="flex flex-col gap-6 lg:flex-row">
             <aside className="w-full shrink-0 lg:w-80">
-              <div className="sticky top-6 space-y-5 rounded-xl border border-border bg-card p-5">
+              <div className="sticky top-6 space-y-5">
                 <div className="flex items-center gap-2.5">
                   <CheckCircle className="h-5 w-5 text-success" />
                   <h3 className="text-sm font-semibold text-foreground">

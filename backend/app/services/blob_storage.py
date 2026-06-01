@@ -54,3 +54,29 @@ def fetch_bytes(url: str) -> bytes:
         response = client.get(url)
     response.raise_for_status()
     return response.content
+
+
+def list_all_blobs() -> list[dict]:
+    """List every object in the store (paginated)."""
+    items: list[dict] = []
+    cursor: str | None = None
+    while True:
+        options: dict = {"limit": 1000, "mode": "expanded"}
+        if cursor:
+            options["cursor"] = cursor
+        page = vercel_blob.list(options, timeout=120)
+        items.extend(page.get("blobs") or [])
+        if not page.get("hasMore"):
+            break
+        cursor = page.get("cursor")
+        if not cursor:
+            break
+    return items
+
+
+def delete_urls(urls: list[str]) -> None:
+    if not urls:
+        return
+    batch_size = 50
+    for i in range(0, len(urls), batch_size):
+        vercel_blob.delete(urls[i : i + batch_size], timeout=120)

@@ -44,6 +44,14 @@ RECOMMENDATION_LABELS: dict[str, str] = {
     "blur": "Заблюрить",
 }
 
+COMPLIANCE_STATUS_LABELS: dict[str, str] = {
+    "ok": "Соответствует",
+    "attention": "Внимание",
+    "review": "На проверку",
+    "violation": "Нарушение",
+    "expertise": "Экспертиза",
+}
+
 
 def _set_cell_text(cell, text: str, bold: bool = False, size: int = 10) -> None:
     cell.text = ""
@@ -105,6 +113,43 @@ def generate_report(analysis: AnalysisResponse) -> bytes:
         for cat, count in summary.risk_categories.items():
             label = RISK_LABELS.get(cat, cat)
             doc.add_paragraph(f"• {label}: {count}", style="List Bullet")
+
+    raw_summary = analysis.summary or {}
+    compliance = raw_summary.get("compliance_checks") or []
+    if compliance:
+        doc.add_paragraph("")
+        doc.add_heading("Соответствие законодательству", level=2)
+        for check in compliance:
+            status = COMPLIANCE_STATUS_LABELS.get(
+                check.get("status", ""), check.get("status", "")
+            )
+            line = f"• {check.get('law', '')} — {check.get('title', '')}: {status}"
+            if check.get("findings_count"):
+                line += f" ({check['findings_count']})"
+            doc.add_paragraph(line, style="List Bullet")
+            if check.get("note"):
+                doc.add_paragraph(check["note"])
+        disclaimer = raw_summary.get("legal_disclaimer")
+        if disclaimer:
+            doc.add_paragraph(disclaimer)
+
+    registry_rows = raw_summary.get("registry_verifications") or []
+    if registry_rows:
+        doc.add_paragraph("")
+        doc.add_heading("Сверка с реестрами Минюста", level=2)
+        for row in registry_rows:
+            name = row.get("name", "—")
+            if row.get("registry_status") == "in_registry":
+                detail = f"в реестре: {row.get('matched_registry_name', '')}"
+            elif row.get("registry_status") == "not_in_registry":
+                detail = "не найден в загруженных реестрах"
+            else:
+                detail = "реестр недоступен"
+            doc.add_paragraph(f"• {name} — {detail}", style="List Bullet")
+            if row.get("article"):
+                doc.add_paragraph(row["article"])
+            if row.get("required_marking") and row.get("marking_found") is False:
+                doc.add_paragraph("Маркировка иноагента в кадре не обнаружена.")
 
     doc.add_page_break()
 

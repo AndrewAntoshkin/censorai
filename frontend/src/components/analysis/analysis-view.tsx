@@ -339,40 +339,55 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
   return (
     <AppLayout
+      splitScroll
       breadcrumb={[
         { label: "Главная", href: "/" },
         { label: analysis.video_title || "Результат" },
       ]}
     >
-      <div className="mx-auto max-w-6xl">
-        <Link
-          href="/"
-          className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Назад
-        </Link>
+      <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col overflow-y-auto lg:overflow-hidden">
+        <div className="shrink-0">
+          <Link
+            href="/"
+            className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Назад
+          </Link>
 
-        <h1 className="mb-1 text-2xl font-semibold tracking-tight text-foreground">
-          {analysis.video_title || "Результат анализа"}
-        </h1>
-        {(analysis.duration || summary) && (
-          <p className="mb-7 text-sm text-muted-foreground">
-            {[
-              analysis.duration,
-              summary ? `${summary.risky_scenes} нарушений из ${summary.total_scenes} сцен` : null,
-              analysis.analyzed_at
-                ? `проверено ${new Date(analysis.analyzed_at).toLocaleDateString("ru-RU")}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        )}
+          <div className="mb-1 flex items-start justify-between gap-4">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-foreground">
+              {analysis.video_title || "Результат анализа"}
+            </h1>
+            <Button
+              className="shrink-0 gap-2 bg-black text-white hover:bg-neutral-800"
+              size="lg"
+              onClick={() => {
+                window.open(api.files.getReportUrl(fileId), "_blank");
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Скачать отчёт
+            </Button>
+          </div>
+          {(analysis.duration || summary) && (
+            <p className="mb-6 text-sm text-muted-foreground">
+              {[
+                analysis.duration,
+                summary ? `${summary.risky_scenes} нарушений из ${summary.total_scenes} сцен` : null,
+                analysis.analyzed_at
+                  ? `проверено ${new Date(analysis.analyzed_at).toLocaleDateString("ru-RU")}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+        </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <aside className="w-full shrink-0 lg:w-80">
-            <div className="sticky top-6 space-y-5 rounded-xl border border-border bg-card p-5">
+        <div className="flex flex-col gap-12 lg:min-h-0 lg:flex-1 lg:flex-row">
+          <aside className="w-full shrink-0 lg:flex lg:w-80 lg:min-h-0 lg:flex-col">
+            <div className="space-y-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:scrollbar-hidden lg:pr-1">
               <h3 className="text-sm font-semibold text-foreground">
                 Детали проверки
               </h3>
@@ -390,15 +405,33 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                             const tone =
                               c.status === "ok"
                                 ? "text-success"
-                                : c.status === "review"
-                                  ? "text-primary"
-                                  : "text-warning";
+                                : c.status === "violation"
+                                  ? "text-critical"
+                                  : c.status === "expertise"
+                                    ? "text-primary"
+                                    : c.status === "review"
+                                      ? "text-primary"
+                                      : "text-warning";
                             const dot =
                               c.status === "ok"
                                 ? "bg-success"
-                                : c.status === "review"
-                                  ? "bg-primary"
-                                  : "bg-warning";
+                                : c.status === "violation"
+                                  ? "bg-critical"
+                                  : c.status === "expertise"
+                                    ? "bg-primary"
+                                    : c.status === "review"
+                                      ? "bg-primary"
+                                      : "bg-warning";
+                            const statusLabel =
+                              c.status === "ok"
+                                ? "соответствует"
+                                : c.status === "violation"
+                                  ? "нарушение"
+                                  : c.status === "expertise"
+                                    ? "экспертиза"
+                                    : c.status === "review"
+                                      ? "на проверку"
+                                      : "внимание";
                             return (
                               <li
                                 key={i}
@@ -414,11 +447,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                                     <span
                                       className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`}
                                     />
-                                    {c.status === "ok"
-                                      ? "соответствует"
-                                      : c.status === "review"
-                                        ? "на проверку"
-                                        : "внимание"}
+                                    {statusLabel}
                                     {c.findings_count > 0 ? ` · ${c.findings_count}` : ""}
                                   </span>
                                 </div>
@@ -430,20 +459,70 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                                     {c.note}
                                   </p>
                                 )}
+                                {c.articles && c.articles.length > 0 && (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {c.articles.join(" · ")}
+                                  </p>
+                                )}
                               </li>
                             );
                           })}
                         </ul>
                         <p className="mt-2 text-[11px] text-muted-foreground">
-                          Triage-проверка, не юридическое заключение.
+                          {summary.legal_disclaimer ||
+                            "Triage-проверка, не юридическое заключение."}
                         </p>
+                      </div>
+                    )}
+
+                  {summary.registry_verifications &&
+                    summary.registry_verifications.length > 0 && (
+                      <div className="border-t border-border pt-4">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Сверка с реестрами Минюста
+                        </p>
+                        <ul className="space-y-2 text-xs">
+                          {summary.registry_verifications.map((v, i) => (
+                            <li
+                              key={i}
+                              className={cn(
+                                "rounded-md border p-2",
+                                v.severity === "violation"
+                                  ? "border-critical/40 bg-critical/5"
+                                  : v.registry_status === "in_registry"
+                                    ? "border-warning/40 bg-warning/5"
+                                    : "border-border bg-card"
+                              )}
+                            >
+                              <div className="font-medium text-foreground">{v.name}</div>
+                              <div className="mt-0.5 text-muted-foreground">
+                                {v.registry_status === "in_registry"
+                                  ? `В реестре: ${v.matched_registry_name}`
+                                  : v.registry_status === "not_in_registry"
+                                    ? "Не найден в загруженных реестрах"
+                                    : "Реестр недоступен"}
+                              </div>
+                              {v.article && (
+                                <div className="mt-0.5 text-foreground/80">{v.article}</div>
+                              )}
+                              {v.required_marking && (
+                                <div className="mt-1 text-[10px] text-foreground/90">
+                                  Маркировка: «{v.required_marking}»
+                                  {v.marking_found === false && (
+                                    <span className="text-critical"> — не обнаружена в видео</span>
+                                  )}
+                                </div>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
 
                   {summary.entities && summary.entities.length > 0 && (
                     <div className="border-t border-border pt-4">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Сущности для проверки по реестрам
+                        Сущности в кадре
                       </p>
                       <ul className="space-y-1.5 text-xs">
                         {summary.entities.map((e, i) => (
@@ -454,6 +533,12 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                                 {" "}
                                 ({ENTITY_TYPE_LABELS[e.type] || e.type})
                               </span>
+                            )}
+                            {e.registry_status === "in_registry" && (
+                              <span className="ml-1 text-critical"> · в реестре</span>
+                            )}
+                            {e.registry_status === "not_in_registry" && (
+                              <span className="ml-1 text-success"> · не в реестре</span>
                             )}
                             {e.context && (
                               <span className="text-muted-foreground"> — {e.context}</span>
@@ -537,20 +622,10 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                 </>
               )}
 
-              <Button
-                className="w-full gap-2"
-                size="lg"
-                onClick={() => {
-                  window.open(api.files.getReportUrl(fileId), "_blank");
-                }}
-              >
-                <Download className="h-4 w-4" />
-                Скачать отчёт
-              </Button>
             </div>
           </aside>
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto lg:scrollbar-hidden">
             {incomplete && (
               <IncompleteCoverageBanner
                 note={

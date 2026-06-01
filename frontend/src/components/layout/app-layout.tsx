@@ -1,19 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { UploadModal } from "@/components/upload/upload-modal";
+import { countActiveUploadJobs, subscribeUploadJobs } from "@/lib/upload-jobs";
+import { cn } from "@/lib/utils";
 
 interface AppLayoutProps {
   children: React.ReactNode;
   breadcrumb: { label: string; href?: string }[];
+  /** Две колонки с независимым скроллом (без прокрутки всего main). */
+  splitScroll?: boolean;
 }
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
-export function AppLayout({ children, breadcrumb }: AppLayoutProps) {
+export function AppLayout({ children, breadcrumb, splitScroll }: AppLayoutProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const activeUploads = useSyncExternalStore(
+    subscribeUploadJobs,
+    countActiveUploadJobs,
+    () => 0
+  );
 
   return (
     <div className="flex h-screen gap-0 bg-sidebar p-1.5">
@@ -27,8 +36,16 @@ export function AppLayout({ children, breadcrumb }: AppLayoutProps) {
         <Header
           breadcrumb={breadcrumb}
           onUpload={DEMO_MODE ? undefined : () => setUploadOpen(true)}
+          activeUploadCount={DEMO_MODE ? 0 : activeUploads}
         />
-        <main className="flex-1 overflow-y-auto scrollbar-quiet px-8 py-8">
+        <main
+          className={cn(
+            "flex-1 scrollbar-quiet px-12 py-8",
+            splitScroll
+              ? "flex min-h-0 flex-col overflow-hidden"
+              : "overflow-y-auto"
+          )}
+        >
           {children}
         </main>
       </div>
