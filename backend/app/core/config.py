@@ -63,7 +63,9 @@ class Settings(BaseSettings):
     REPLICATE_MAX_VIDEO_MINUTES: int = 45
 
     REPLICATE_VIDEO_FPS: float = 1
-    REPLICATE_MAX_OUTPUT_TOKENS: int = 16384
+    # 16384 made the model self-truncate long videos to a ~5-min "fragment".
+    # 65535 lets it cover a full ~25-min episode (verified end-to-end).
+    REPLICATE_MAX_OUTPUT_TOKENS: int = 65535
     REPLICATE_THINKING_LEVEL: str = "none"
 
     HTTPS_PROXY_URL: str = ""
