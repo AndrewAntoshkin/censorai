@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     ANALYSIS_MAX_COVERAGE_RETRIES: int = 2
     REPLICATE_THINKING_LEVEL: str = "none"
 
+    # On Vercel, drop Blob objects after analysis to stay within storage quota.
+    DELETE_BLOB_AFTER_ANALYSIS: bool = True
+
     HTTPS_PROXY_URL: str = ""
 
     VIDEO_PROVIDER: str = "replicate"  # "replicate" | "gemini"

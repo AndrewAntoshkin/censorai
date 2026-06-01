@@ -39,6 +39,7 @@ from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
 from app.services.storage_service import storage_service
 from app.services.legal_compliance import enrich_analysis_summary
+from app.services.video_blob_cleanup import release_video_blob
 from app.services.video_media import ensure_public_video_url
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,12 @@ async def _save_analysis_result(
     video.progress = 100
     video.analysis_id = analysis.id
     await db.flush()
+
+    blob_path = video.storage_path
+    if await asyncio.to_thread(release_video_blob, blob_path):
+        video.storage_path = None
+        await db.flush()
+
     return analysis
 
 

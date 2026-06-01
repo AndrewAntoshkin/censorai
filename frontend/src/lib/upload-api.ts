@@ -4,6 +4,18 @@ const CHUNK_SIZE = 3 * 1024 * 1024;
 const BLOB_MULTIPART_THRESHOLD = 4 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
+function formatChunkUploadError(status: number, body: string, part: number, total: number): string {
+  const lower = body.toLowerCase();
+  if (lower.includes("storage quota exceeded") || lower.includes("quota exceeded")) {
+    return (
+      "Хранилище Vercel Blob переполнено (лимит Hobby — 1 ГБ). " +
+      "Очистите Storage → Blob в Vercel или обновите тариф. " +
+      "После успешного анализа новые видео удаляются с Blob автоматически."
+    );
+  }
+  return `Chunk ${part + 1}/${total} failed: ${status} ${body}`;
+}
+
 function isLocalDev(): boolean {
   if (typeof window === "undefined") return false;
   const host = window.location.hostname;
@@ -245,7 +257,9 @@ async function uploadViaChunks(
     );
     if (!chunkRes.ok) {
       const body = await chunkRes.text();
-      throw new Error(`Chunk ${part + 1}/${totalParts} failed: ${chunkRes.status} ${body}`);
+      throw new Error(
+        formatChunkUploadError(chunkRes.status, body, part, totalParts)
+      );
     }
 
     const percent = Math.round(((part + 1) / totalParts) * 85);

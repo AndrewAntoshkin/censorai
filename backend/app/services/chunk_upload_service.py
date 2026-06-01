@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.upload_session import UploadChunkSession
-from app.services.blob_storage import blob_enabled, fetch_bytes, put_bytes
+from app.services.blob_storage import blob_enabled, delete_urls, fetch_bytes, put_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +276,7 @@ def merge_session(session_id: str) -> tuple[str | Path, UploadSession]:
             content_type="video/mp4",
             add_random_suffix=True,
         )
+        delete_urls(list(session.part_urls.values()))
         cleanup_session(session_id)
         return result["url"], session
 
