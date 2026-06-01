@@ -450,12 +450,8 @@ async def recent_files(
     analyzed_only: bool = True,
     db: AsyncSession = Depends(get_db),
 ):
-    import asyncio
-
-    from app.services.seed_bundle import ensure_demo_seeded
-
-    await asyncio.to_thread(ensure_demo_seeded)
-
+    # Demo seeding already runs once at DB init (get_db -> ensure_database);
+    # no need to re-check it on every request.
     stmt = (
         select(VideoFile)
         .options(selectinload(VideoFile.analysis))
