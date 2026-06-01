@@ -2,12 +2,13 @@
 
 import logging
 import os
-import re
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
-_UNSUPPORTED_QUERY_KEYS = frozenset({"channel_binding"})
+_UNSUPPORTED_QUERY_KEYS = frozenset(
+    {"channel_binding", "sslmode", "sslcert", "sslkey", "sslrootcert", "sslcrl"}
+)
 
 
 def _clean_neon_url(url: str) -> str:
@@ -33,7 +34,7 @@ def _normalize_async_url(raw: str) -> str:
 
 
 def _normalize_sync_url(raw: str) -> str:
-    url = raw.strip()
+    url = _clean_neon_url(raw.strip())
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
     if url.startswith("postgresql+asyncpg://"):
