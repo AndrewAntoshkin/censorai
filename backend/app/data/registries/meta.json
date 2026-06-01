@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-06-01T14:35:30.980091+00:00",
-  "foreign_agents_source": "https://minjust.gov.ru/ru/activity/directions/998/",
-  "foreign_agents_mirror": "https://raw.githubusercontent.com/fz255/foreign-agents/main/registry.json",
-  "extremist_orgs_source": "https://minjust.gov.ru/",
-  "foreign_agents_count": 655,
+  "updated_at": "2026-06-01T15:55:10.749522+00:00",
+  "foreign_agents_source": "https://minjust.gov.ru/ru/pages/reestr-inostryannykh-agentov/",
+  "foreign_agents_api": "https://reestrs.minjust.gov.ru",
+  "foreign_agents_registry_id": "39b95df9-9a68-6b6d-e1e3-e6388507067e",
+  "foreign_agents_count": 962,
   "extremist_orgs_count": 0
 }

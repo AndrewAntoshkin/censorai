@@ -119,6 +119,33 @@ def _match_person(query: str, entry_name: str) -> bool:
     return all(any(qt in nt or nt in qt for nt in name_tokens) for qt in q_tokens)
 
 
+def _members_parts(members: str) -> list[str]:
+    text = (members or "").strip().strip("[]")
+    if not text:
+        return []
+    return [part.strip() for part in re.split(r"[,;]", text) if part.strip()]
+
+
+def _entry_match_label(query: str, entry: dict) -> str | None:
+    """Return display name if query matches registry row (title or members list)."""
+    full_name = (entry.get("fullName") or entry.get("name") or "").strip()
+    if not full_name:
+        return None
+
+    q_norm = _normalize(query)
+    n_norm = _normalize(full_name)
+    if q_norm in n_norm or n_norm in q_norm:
+        return full_name
+    if _match_person(query, full_name) or _match_organization(query, full_name):
+        return full_name
+
+    for member in _members_parts(entry.get("members") or ""):
+        m_norm = _normalize(member)
+        if q_norm in m_norm or _match_person(query, member):
+            return f"{full_name} (участник: {member})"
+    return None
+
+
 def _match_organization(query: str, entry_name: str) -> bool:
     q = _normalize(query)
     name = _normalize(entry_name)
@@ -133,36 +160,27 @@ def search_foreign_agent(name: str) -> RegistryMatch | None:
         return None
 
     query = name.strip()
-    q_norm = _normalize(query)
 
     for entry in _foreign_agents:
-        full_name = (entry.get("fullName") or entry.get("name") or "").strip()
-        if not full_name:
-            continue
-        excluded = bool((entry.get("dateOut") or "").strip())
-        if excluded:
+        if (entry.get("dateOut") or "").strip():
             continue
 
-        n_norm = _normalize(full_name)
-        matched = False
-        if q_norm in n_norm or n_norm in q_norm:
-            matched = True
-        elif _match_person(query, full_name) or _match_organization(query, full_name):
-            matched = True
+        matched_name = _entry_match_label(query, entry)
+        if not matched_name:
+            continue
 
-        if matched:
-            return RegistryMatch(
-                registry="foreign_agents",
-                registry_title="Реестр иностранных агентов (Минюст РФ)",
-                matched_name=full_name,
-                law="255-ФЗ",
-                article="ст. 9 — распространение материалов иноагента с маркировкой",
-                source_url=_meta.get(
-                    "foreign_agents_source",
-                    "https://minjust.gov.ru/ru/activity/directions/998/",
-                ),
-                inclusion_date=(entry.get("dateIn") or None),
-            )
+        return RegistryMatch(
+            registry="foreign_agents",
+            registry_title="Реестр иностранных агентов (Минюст РФ)",
+            matched_name=matched_name,
+            law="255-ФЗ",
+            article="ст. 9 — распространение материалов иноагента с маркировкой",
+            source_url=_meta.get(
+                "foreign_agents_source",
+                "https://minjust.gov.ru/ru/pages/reestr-inostryannykh-agentov/",
+            ),
+            inclusion_date=(entry.get("dateIn") or None),
+        )
 
     return None
 
