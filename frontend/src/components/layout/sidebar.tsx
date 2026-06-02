@@ -68,6 +68,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
   const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>([]);
+  const [backendInProgressCount, setBackendInProgressCount] = useState(0);
   const [readyToasts, setReadyToasts] = useState<Array<{ id: string; fileId: string; name: string }>>(
     []
   );
@@ -80,15 +81,28 @@ export function Sidebar() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.projects.list(), api.files.recent(6)])
-      .then(([p, r]) => {
-        if (!active) return;
-        setProjects(p);
-        setRecentFiles(r);
-      })
+    const load = async () => {
+      const [p, r, allReports] = await Promise.all([
+        api.projects.list(),
+        api.files.recent(6, { analyzedOnly: false }),
+        api.files.recent(100, { analyzedOnly: false }),
+      ]);
+      if (!active) return;
+      const inProgress = allReports.filter((f) =>
+        ["uploading", "uploaded", "analyzing"].includes((f.status || "").toLowerCase())
+      ).length;
+      setBackendInProgressCount(inProgress);
+      setProjects(p);
+      setRecentFiles(r);
+    };
+    void load()
       .catch(() => {});
+    const poll = window.setInterval(() => {
+      void load().catch(() => {});
+    }, 5000);
     return () => {
       active = false;
+      window.clearInterval(poll);
     };
   }, []);
 
@@ -106,9 +120,12 @@ export function Sidebar() {
     }
   }, [jobs]);
 
-  const activeReportsCount = jobs.filter((j) =>
-    j.status === "uploading" || j.status === "uploaded" || j.status === "analyzing"
+  const localPreRegisterCount = jobs.filter(
+    (j) =>
+      (j.status === "uploading" || j.status === "uploaded" || j.status === "analyzing") &&
+      !j.fileId
   ).length;
+  const activeReportsCount = backendInProgressCount + localPreRegisterCount;
 
   return (
     <aside className="flex h-full w-60 min-w-60 flex-col px-2 pb-1 pt-1.5 text-sidebar-foreground">

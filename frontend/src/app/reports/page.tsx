@@ -6,6 +6,7 @@ import { ReportsTable } from "@/components/reports/reports-table";
 import { api, type VideoFileAPI } from "@/lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getUploadJobsSnapshot, subscribeUploadJobs } from "@/lib/upload-jobs";
 
 const REPORTS_LIMIT = 100;
 const WORKING_STATUSES = new Set(["uploading", "uploaded", "analyzing"]);
@@ -14,6 +15,7 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<VideoFileAPI[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"all" | "in_progress">("all");
+  const [localInFlightCount, setLocalInFlightCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -37,6 +39,21 @@ export default function ReportsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const update = () => {
+      const jobs = getUploadJobsSnapshot();
+      setLocalInFlightCount(
+        jobs.filter(
+          (j) =>
+            ["uploading", "uploaded", "analyzing"].includes(j.status) &&
+            !j.fileId
+        ).length
+      );
+    };
+    update();
+    return subscribeUploadJobs(update);
+  }, []);
+
   const handleProjectAssigned = (fileId: string, projectId: string) => {
     setReports((prev) =>
       prev.map((f) => (f.id === fileId ? { ...f, project_id: projectId } : f))
@@ -45,7 +62,7 @@ export default function ReportsPage() {
 
   const inProgressCount = reports.filter((f) =>
     WORKING_STATUSES.has((f.status || "").toLowerCase())
-  ).length;
+  ).length + localInFlightCount;
 
   return (
     <AppLayout breadcrumb={[{ label: "Главная", href: "/" }, { label: "Отчёты" }]}>
@@ -99,6 +116,12 @@ export default function ReportsPage() {
                   : "Пока нет готовых отчётов. Загрузите видео и дождитесь анализа."
               }
             />
+            {activeTab === "in_progress" && localInFlightCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Идёт загрузка на сервер: {localInFlightCount}{" "}
+                {localInFlightCount === 1 ? "файл" : "файла"}.
+              </p>
+            )}
           </div>
         )}
       </div>
