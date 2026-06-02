@@ -21,7 +21,7 @@ export function ContactForm() {
         <h3 className="text-xl font-semibold text-white mb-2">
           Заявка отправлена
         </h3>
-        <p className="text-gray-400 text-sm">
+        <p className="text-neutral-400 text-sm">
           Мы свяжемся с вами в ближайшее время
         </p>
       </div>
@@ -37,7 +37,7 @@ export function ContactForm() {
           placeholder="Контактное лицо"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
         />
       </div>
       <div>
@@ -47,7 +47,7 @@ export function ContactForm() {
           placeholder="Название организации"
           value={form.company}
           onChange={(e) => setForm({ ...form, company: e.target.value })}
-          className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
         />
       </div>
       <div>
@@ -57,7 +57,7 @@ export function ContactForm() {
           placeholder="Рабочая почта"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
-          className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
         />
       </div>
       <label className="flex items-start gap-3 cursor-pointer">
@@ -66,11 +66,11 @@ export function ContactForm() {
           required
           checked={form.consent}
           onChange={(e) => setForm({ ...form, consent: e.target.checked })}
-          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/10 text-blue-500 focus:ring-blue-500/30"
+          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/10 text-[#0048ff] focus:ring-[#0048ff]/30"
         />
-        <span className="text-xs text-gray-400 leading-relaxed">
+        <span className="text-xs text-neutral-400 leading-relaxed">
           Даю согласие на{" "}
-          <span className="text-gray-300 underline underline-offset-2">
+          <span className="text-neutral-300 underline underline-offset-2">
             обработку персональных данных
           </span>{" "}
           в соответствии с 152-ФЗ
@@ -79,7 +79,7 @@ export function ContactForm() {
       <button
         type="submit"
         disabled={status === "loading" || !form.consent}
-        className="w-full inline-flex items-center justify-center gap-2 bg-white text-gray-900 px-8 py-3.5 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-70"
+        className="w-full inline-flex items-center justify-center gap-2 bg-white text-neutral-900 px-8 py-3.5 rounded-full text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-70"
       >
         {status === "loading" ? (
           <Loader2 className="w-4 h-4 animate-spin" />

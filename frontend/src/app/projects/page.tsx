@@ -1,7 +1,7 @@
 "use client";
 
 import { AppLayout } from "@/components/layout/app-layout";
-import { Search, Folder, Plus, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Search, Folder, Plus, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { api, type ProjectAPI } from "@/lib/api";
@@ -9,11 +9,20 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
@@ -21,6 +30,10 @@ export default function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameProjectId, setRenameProjectId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -33,6 +46,43 @@ export default function ProjectsPage() {
       active = false;
     };
   }, []);
+
+  const openRenameDialog = (project: ProjectAPI) => {
+    setRenameProjectId(project.id);
+    setRenameName(project.name);
+    setRenameError(null);
+    setRenameOpen(true);
+  };
+
+  const closeRenameDialog = () => {
+    setRenameOpen(false);
+    setRenameProjectId(null);
+    setRenameName("");
+    setRenameError(null);
+  };
+
+  const submitRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameProjectId) return;
+    const trimmed = renameName.trim();
+    if (!trimmed) {
+      setRenameError("Название проекта не может быть пустым.");
+      return;
+    }
+    setRenamingId(renameProjectId);
+    setRenameError(null);
+    try {
+      const updated = await api.projects.rename(renameProjectId, trimmed);
+      setProjects((prev) =>
+        prev.map((p) => (p.id === renameProjectId ? { ...p, name: updated.name } : p))
+      );
+      closeRenameDialog();
+    } catch {
+      setRenameError("Не удалось переименовать проект. Попробуйте еще раз.");
+    } finally {
+      setRenamingId(null);
+    }
+  };
 
   return (
     <AppLayout breadcrumb={[{ label: "Главная", href: "/" }, { label: "Проекты" }]}>
@@ -66,9 +116,17 @@ export default function ProjectsPage() {
         </div>
 
         {loading ? (
-          <div className="flex h-40 items-center justify-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Загрузка…
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+              >
+                <Skeleton className="aspect-[5/3] w-full rounded-lg" />
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-4 w-1/3" />
+              </div>
+            ))}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -87,32 +145,10 @@ export default function ProjectsPage() {
                   <DropdownMenuContent align="end" className="w-40">
                     <DropdownMenuItem
                       disabled={renamingId === project.id}
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const nextName = window.prompt(
-                          "Новое название проекта",
-                          project.name
-                        );
-                        if (nextName == null) return;
-                        const trimmed = nextName.trim();
-                        if (!trimmed) {
-                          window.alert("Название проекта не может быть пустым.");
-                          return;
-                        }
-                        setRenamingId(project.id);
-                        try {
-                          const updated = await api.projects.rename(project.id, trimmed);
-                          setProjects((prev) =>
-                            prev.map((p) =>
-                              p.id === project.id ? { ...p, name: updated.name } : p
-                            )
-                          );
-                        } catch {
-                          window.alert("Не удалось переименовать проект. Попробуйте еще раз.");
-                        } finally {
-                          setRenamingId(null);
-                        }
+                        openRenameDialog(project);
                       }}
                     >
                       <Pencil className="h-4 w-4" />
@@ -172,6 +208,41 @@ export default function ProjectsPage() {
         onOpenChange={setCreateOpen}
         onCreated={(project) => setProjects((prev) => [project, ...prev])}
       />
+
+      <Dialog open={renameOpen} onOpenChange={(next) => !renamingId && !next && closeRenameDialog()}>
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={submitRename}>
+            <DialogHeader>
+              <DialogTitle>Переименовать проект</DialogTitle>
+              <DialogDescription>Введите новое название проекта.</DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <Input
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                placeholder="Название проекта"
+                autoFocus
+                disabled={!!renamingId}
+                className="h-10"
+              />
+              {renameError && <p className="mt-2 text-xs text-critical">{renameError}</p>}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeRenameDialog}
+                disabled={!!renamingId}
+              >
+                Отмена
+              </Button>
+              <Button type="submit" disabled={!!renamingId || !renameName.trim()}>
+                {renamingId ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

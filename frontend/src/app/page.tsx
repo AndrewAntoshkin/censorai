@@ -1,13 +1,14 @@
 "use client";
 
 import { AppLayout } from "@/components/layout/app-layout";
-import { Search, Folder, Film, LayoutGrid, List, Loader2 } from "lucide-react";
+import { Search, Folder, LayoutGrid, List } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api, getApiBase, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ReportsList } from "@/components/reports/reports-list";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function HomePage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -86,37 +87,27 @@ export default function HomePage() {
         </div>
 
         {loading ? (
-          <div className="flex h-40 items-center justify-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Загрузка…
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
+                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-8 w-20" />
+              </div>
+              <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
+                <Skeleton className="h-8 w-8" />
+                <Skeleton className="h-8 w-8" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-4">
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
-          <>
-            {recent.length > 0 && (
-              <section>
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-foreground">Недавние</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {recent.slice(0, 4).map((file) => (
-                    <Link
-                      key={file.id}
-                      href={`/file/${file.id}`}
-                      className="group rounded-xl border border-border bg-card p-3 transition-all hover:border-primary/30 hover:shadow-sm"
-                    >
-                      <div className="mb-3 flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-muted">
-                        <Film className="h-7 w-7 text-muted-foreground/60" />
-                      </div>
-                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-                        {file.name}
-                      </p>
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section>
+          <section>
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
                   <button
@@ -236,8 +227,7 @@ export default function HomePage() {
                   }
                 />
               )}
-            </section>
-          </>
+          </section>
         )}
       </div>
     </AppLayout>

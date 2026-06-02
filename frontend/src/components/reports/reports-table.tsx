@@ -14,11 +14,14 @@ const PAGE_SIZE = 10;
 
 interface ReportsTableProps {
   files: VideoFileAPI[];
+  statusFilter?: "all" | "in_progress";
   emptyMessage?: string;
   onProjectAssigned?: (fileId: string, projectId: string) => void;
   onFilesChanged?: (files: VideoFileAPI[]) => void;
   className?: string;
 }
+
+const WORKING_STATUSES = new Set(["uploading", "uploaded", "analyzing"]);
 
 function formatReportDate(iso: string): string {
   try {
@@ -34,6 +37,7 @@ function formatReportDate(iso: string): string {
 
 export function ReportsTable({
   files,
+  statusFilter = "all",
   emptyMessage = "Пока нет готовых отчётов",
   onProjectAssigned,
   onFilesChanged,
@@ -69,9 +73,13 @@ export function ReportsTable({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return files;
-    return files.filter((f) => f.name.toLowerCase().includes(q));
-  }, [files, query]);
+    const base =
+      statusFilter === "in_progress"
+        ? files.filter((f) => WORKING_STATUSES.has((f.status || "").toLowerCase()))
+        : files;
+    if (!q) return base;
+    return base.filter((f) => f.name.toLowerCase().includes(q));
+  }, [files, query, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
 

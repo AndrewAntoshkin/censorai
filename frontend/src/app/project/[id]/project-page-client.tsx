@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { ArrowLeft, Folder, LayoutGrid, List, Film, Loader2 } from "lucide-react";
+import { ArrowLeft, Folder, LayoutGrid, List, Film } from "lucide-react";
 import { api, type ProjectAPI } from "@/lib/api";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { FileStatusBadge } from "@/components/shared/file-status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function ProjectPageClient({ id }: { id: string }) {
   const [project, setProject] = useState<ProjectAPI | null>(null);
@@ -30,9 +31,23 @@ export function ProjectPageClient({ id }: { id: string }) {
   if (loading) {
     return (
       <AppLayout breadcrumb={[{ label: "Главная", href: "/" }, { label: "Загрузка…" }]}>
-        <div className="flex h-64 items-center justify-center gap-3 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          Загрузка…
+        <div className="mx-auto max-w-5xl space-y-8">
+          <div>
+            <Skeleton className="mb-4 h-5 w-24" />
+            <Skeleton className="h-9 w-64" />
+            <Skeleton className="mt-2 h-4 w-48" />
+          </div>
+          <section>
+            <Skeleton className="mb-3 h-5 w-20" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-3">
+                  <Skeleton className="mb-2 h-24 w-full rounded-lg" />
+                  <Skeleton className="h-4 w-2/3" />
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       </AppLayout>
     );

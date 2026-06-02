@@ -1,26 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ReportsTable } from "@/components/reports/reports-table";
 import { api, type VideoFileAPI } from "@/lib/api";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const REPORTS_LIMIT = 100;
+const WORKING_STATUSES = new Set(["uploading", "uploaded", "analyzing"]);
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<VideoFileAPI[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"all" | "in_progress">("all");
 
   useEffect(() => {
     let active = true;
-    api.files
-      .recent(REPORTS_LIMIT)
-      .then((list) => active && setReports(list))
-      .catch(() => {})
-      .finally(() => active && setLoading(false));
+    const load = async () => {
+      try {
+        const list = await api.files.recent(REPORTS_LIMIT, { analyzedOnly: false });
+        if (active) setReports(list);
+      } catch {
+        // noop
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    const poll = window.setInterval(() => {
+      void load();
+    }, 5000);
     return () => {
       active = false;
+      window.clearInterval(poll);
     };
   }, []);
 
@@ -29,6 +42,10 @@ export default function ReportsPage() {
       prev.map((f) => (f.id === fileId ? { ...f, project_id: projectId } : f))
     );
   };
+
+  const inProgressCount = reports.filter((f) =>
+    WORKING_STATUSES.has((f.status || "").toLowerCase())
+  ).length;
 
   return (
     <AppLayout breadcrumb={[{ label: "Главная", href: "/" }, { label: "Отчёты" }]}>
@@ -45,17 +62,44 @@ export default function ReportsPage() {
         </div>
 
         {loading ? (
-          <div className="flex h-40 items-center justify-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Загрузка…
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-9 w-20" />
+              <Skeleton className="h-9 w-28" />
+            </div>
+            <Skeleton className="h-11 w-full rounded-xl" />
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            </div>
           </div>
         ) : (
-          <ReportsTable
-            files={reports}
-            onProjectAssigned={handleProjectAssigned}
-            onFilesChanged={setReports}
-            emptyMessage="Пока нет готовых отчётов. Загрузите видео и дождитесь анализа."
-          />
+          <div className="space-y-4">
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab((v as "all" | "in_progress") || "all")}
+            >
+              <TabsList variant="line" className="h-9">
+                <TabsTrigger value="all">Все</TabsTrigger>
+                <TabsTrigger value="in_progress">В работе ({inProgressCount})</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <ReportsTable
+              files={reports}
+              statusFilter={activeTab}
+              onProjectAssigned={handleProjectAssigned}
+              onFilesChanged={setReports}
+              emptyMessage={
+                activeTab === "in_progress"
+                  ? "Сейчас нет отчётов в работе."
+                  : "Пока нет готовых отчётов. Загрузите видео и дождитесь анализа."
+              }
+            />
+          </div>
         )}
       </div>
     </AppLayout>

@@ -252,8 +252,13 @@ export const api = {
 
   files: {
     get: (id: string) => request<VideoFileAPI>(`/api/files/${id}`),
-    recent: (limit = 12) =>
-      request<VideoFileAPI[]>(`/api/files/recent?limit=${limit}`),
+    recent: (limit = 12, options?: { analyzedOnly?: boolean }) => {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (options?.analyzedOnly === false) {
+        params.set("analyzed_only", "false");
+      }
+      return request<VideoFileAPI[]>(`/api/files/recent?${params.toString()}`);
+    },
     assignToProject: (fileId: string, projectId: string) =>
       request<VideoFileAPI>(`/api/files/${fileId}/project`, {
         method: "PATCH",

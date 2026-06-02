@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -16,9 +16,11 @@ import {
   Folder,
   FileText,
   HelpCircle,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
+import { getUploadJobsSnapshot, subscribeUploadJobs } from "@/lib/upload-jobs";
 
 const navItems = [
   { icon: Home, label: "Главная", href: "/" },
@@ -66,6 +68,15 @@ export function Sidebar() {
   const pathname = usePathname();
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
   const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>([]);
+  const [readyToasts, setReadyToasts] = useState<Array<{ id: string; fileId: string; name: string }>>(
+    []
+  );
+  const seenDoneJobs = useRef<Set<string>>(new Set());
+  const jobs = useSyncExternalStore(
+    subscribeUploadJobs,
+    getUploadJobsSnapshot,
+    getUploadJobsSnapshot
+  );
 
   useEffect(() => {
     let active = true;
@@ -80,6 +91,24 @@ export function Sidebar() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const done = jobs.filter((j) => j.status === "done" && j.fileId);
+    if (done.length === 0) return;
+    const created: Array<{ id: string; fileId: string; name: string }> = [];
+    for (const job of done) {
+      if (seenDoneJobs.current.has(job.id)) continue;
+      seenDoneJobs.current.add(job.id);
+      created.push({ id: job.id, fileId: job.fileId!, name: job.file.name });
+    }
+    if (created.length > 0) {
+      setReadyToasts((prev) => [...prev, ...created].slice(-3));
+    }
+  }, [jobs]);
+
+  const activeReportsCount = jobs.filter((j) =>
+    j.status === "uploading" || j.status === "uploaded" || j.status === "analyzing"
+  ).length;
 
   return (
     <aside className="flex h-full w-60 min-w-60 flex-col px-2 pb-1 pt-1.5 text-sidebar-foreground">
@@ -146,7 +175,15 @@ export function Sidebar() {
                     isActive ? "text-primary" : "text-muted-foreground"
                   )}
                 />
-                {item.label}
+                <span>{item.label}</span>
+                {item.href === "/reports" && activeReportsCount > 0 && (
+                  <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                    <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    </span>
+                    {activeReportsCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -211,6 +248,38 @@ export function Sidebar() {
         >
           <HelpCircle className="h-4 w-4" />
         </Link>
+      </div>
+
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[320px] flex-col gap-2">
+        {readyToasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="pointer-events-auto rounded-xl border border-border bg-card p-3 shadow-lg"
+          >
+            <p className="text-sm font-medium text-foreground">Отчёт готов</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">{toast.name}</p>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setReadyToasts((prev) => prev.filter((x) => x.id !== toast.id))
+                }
+                className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Закрыть
+              </button>
+              <Link
+                href={`/file/${toast.fileId}`}
+                onClick={() =>
+                  setReadyToasts((prev) => prev.filter((x) => x.id !== toast.id))
+                }
+                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                Смотреть
+              </Link>
+            </div>
+          </div>
+        ))}
       </div>
     </aside>
   );

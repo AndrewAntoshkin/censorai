@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { riskLevelStyle } from "@/lib/risk";
 import { api, type AnalysisAPI, type SceneAPI } from "@/lib/api";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const RISK_LABELS: Record<string, string> = {
   drugs: "Наркотики",
@@ -315,9 +316,33 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
   if (loading) {
     return (
       <AppLayout breadcrumb={[{ label: "Главная", href: "/" }, { label: "Загрузка…" }]}>
-        <div className="flex h-64 items-center justify-center gap-3 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          Загрузка результатов анализа…
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div>
+            <Skeleton className="mb-3 h-5 w-20" />
+            <Skeleton className="h-9 w-96 max-w-full" />
+            <Skeleton className="mt-2 h-4 w-64" />
+          </div>
+          <div className="flex flex-col gap-6 lg:flex-row">
+            <div className="w-full lg:w-80">
+              <div className="rounded-xl border border-border bg-card p-4">
+                <Skeleton className="mb-3 h-4 w-28" />
+                <div className="space-y-2">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              </div>
+            </div>
+            <div className="min-w-0 flex-1 space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-4">
+                  <Skeleton className="mb-3 h-4 w-24" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="mt-2 h-4 w-5/6" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </AppLayout>
     );
