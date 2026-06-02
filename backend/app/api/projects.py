@@ -12,6 +12,7 @@ from app.schemas.project import (
     ProjectCreate,
     ProjectDetailResponse,
     ProjectResponse,
+    ProjectUpdate,
 )
 from app.services.project_buckets import UNASSIGNED_PROJECT_ID, is_system_project
 from app.services.storage_service import storage_service
@@ -62,6 +63,27 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: str, data: ProjectUpdate, db: AsyncSession = Depends(get_db)
+):
+    if is_system_project(project_id):
+        raise HTTPException(status_code=400, detail="Cannot update system project")
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    new_name = data.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Project name cannot be empty")
+
+    project.name = new_name
+    await db.flush()
+    await db.refresh(project)
     return project
 
 

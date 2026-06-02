@@ -1,7 +1,7 @@
 "use client";
 
 import { AppLayout } from "@/components/layout/app-layout";
-import { Search, Folder, Plus, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
+import { Search, Folder, Plus, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { api, type ProjectAPI } from "@/lib/api";
@@ -20,6 +20,7 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -84,6 +85,39 @@ export default function ProjectsPage() {
                     <MoreHorizontal className="h-4 w-4" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem
+                      disabled={renamingId === project.id}
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const nextName = window.prompt(
+                          "Новое название проекта",
+                          project.name
+                        );
+                        if (nextName == null) return;
+                        const trimmed = nextName.trim();
+                        if (!trimmed) {
+                          window.alert("Название проекта не может быть пустым.");
+                          return;
+                        }
+                        setRenamingId(project.id);
+                        try {
+                          const updated = await api.projects.rename(project.id, trimmed);
+                          setProjects((prev) =>
+                            prev.map((p) =>
+                              p.id === project.id ? { ...p, name: updated.name } : p
+                            )
+                          );
+                        } catch {
+                          window.alert("Не удалось переименовать проект. Попробуйте еще раз.");
+                        } finally {
+                          setRenamingId(null);
+                        }
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Переименовать
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       variant="destructive"
                       disabled={deletingId === project.id}

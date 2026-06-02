@@ -7,6 +7,10 @@ class ProjectCreate(BaseModel):
     name: str
 
 
+class ProjectUpdate(BaseModel):
+    name: str
+
+
 class FolderCreate(BaseModel):
     name: str
     project_id: str

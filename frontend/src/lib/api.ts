@@ -239,6 +239,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
+    rename: (id: string, name: string) =>
+      request<ProjectAPI>(`/api/projects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
     delete: (id: string) =>
       request<void>(`/api/projects/${id}`, {
         method: "DELETE",
