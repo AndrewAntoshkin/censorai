@@ -44,6 +44,78 @@ def _tokens(text: str) -> list[str]:
     return [t for t in _normalize(text).split() if len(t) >= 2]
 
 
+# Короткие предлоги/союзы дают ложные совпадения («на» в «татьяна»).
+_STOP_TOKENS = frozenset(
+    {
+        "на",
+        "и",
+        "в",
+        "во",
+        "не",
+        "по",
+        "за",
+        "от",
+        "до",
+        "для",
+        "из",
+        "о",
+        "об",
+        "the",
+        "of",
+        "or",
+        "and",
+    }
+)
+
+
+def _significant_tokens(text: str, *, min_len: int = 3) -> list[str]:
+    return [t for t in _tokens(text) if len(t) >= min_len and t not in _STOP_TOKENS]
+
+
+def _token_match(query_token: str, name_token: str) -> bool:
+    if query_token == name_token:
+        return True
+    short, long = (
+        (query_token, name_token)
+        if len(query_token) <= len(name_token)
+        else (name_token, query_token)
+    )
+    if len(short) < 4 or short not in long:
+        return False
+    # «егор» в «егоров» — допустимо; «мир» в «владимировна» — нет.
+    return len(short) / len(long) >= 0.75
+
+
+def _word_boundary_contains(haystack: str, needle: str) -> bool:
+    if len(needle) < 5:
+        return False
+    pat = re.escape(needle)
+    return bool(
+        re.search(
+            rf"(?:^|[^а-яa-zё]){pat}(?:[^а-яa-zё]|$)",
+            haystack,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+_ORG_NAME_MARKERS = re.compile(
+    r"(ооо|ао|пао|нко|фонд|проект|издание|газет|медиа|телекан|"
+    r"сми|news|media|org|«|»|\"|\')",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_organization(name: str) -> bool:
+    if _ORG_NAME_MARKERS.search(name or ""):
+        return True
+    return len(_significant_tokens(name)) <= 1
+
+
+def _query_too_ambiguous(query: str) -> bool:
+    return len(_significant_tokens(query)) < 2
+
+
 # Платформы/бренды — не считаем «возможным иноагентом» по частичному совпадению.
 _MEDIA_SKIP = frozenset(
     {
@@ -108,15 +180,22 @@ def registry_status() -> dict:
     }
 
 
-def _match_person(query: str, entry_name: str) -> bool:
-    q_tokens = _tokens(query)
-    if len(q_tokens) < 2:
+def _match_full(query: str, entry_name: str) -> bool:
+    """Полное совпадение: все части названия из реестра — точные токены в запросе."""
+    q_norm = _normalize(query)
+    n_norm = _normalize(entry_name)
+    if q_norm == n_norm:
+        return True
+
+    q_tokens = _significant_tokens(query)
+    n_tokens = _significant_tokens(entry_name)
+    if len(q_tokens) < 2 or len(n_tokens) < 2:
         return False
-    name_tokens = _tokens(entry_name)
-    if len(name_tokens) < 2:
-        return False
-    # Все значимые токены запроса должны встретиться в ФИО из реестра.
-    return all(any(qt in nt or nt in qt for nt in name_tokens) for qt in q_tokens)
+
+    if _looks_like_organization(entry_name):
+        return all(any(nt == qt for qt in q_tokens) for nt in n_tokens)
+
+    return all(any(nt == qt for qt in q_tokens) for nt in n_tokens)
 
 
 def _members_parts(members: str) -> list[str]:
@@ -134,14 +213,11 @@ def _entry_match_label(query: str, entry: dict) -> str | None:
 
     q_norm = _normalize(query)
     n_norm = _normalize(full_name)
-    if q_norm in n_norm or n_norm in q_norm:
-        return full_name
-    if _match_person(query, full_name) or _match_organization(query, full_name):
+    if _match_full(query, full_name):
         return full_name
 
     for member in _members_parts(entry.get("members") or ""):
-        m_norm = _normalize(member)
-        if q_norm in m_norm or _match_person(query, member):
+        if _match_full(query, member):
             return f"{full_name} (участник: {member})"
     return None
 
@@ -149,9 +225,11 @@ def _entry_match_label(query: str, entry: dict) -> str | None:
 def _match_organization(query: str, entry_name: str) -> bool:
     q = _normalize(query)
     name = _normalize(entry_name)
-    if len(q) < 4:
+    if len(q) < 5:
         return False
-    return q in name or name in q
+    if q == name:
+        return True
+    return _word_boundary_contains(name, q) or _word_boundary_contains(q, name)
 
 
 def search_foreign_agent(name: str) -> RegistryMatch | None:
@@ -160,6 +238,8 @@ def search_foreign_agent(name: str) -> RegistryMatch | None:
         return None
 
     query = name.strip()
+    if _query_too_ambiguous(query):
+        return None
 
     for entry in _foreign_agents:
         if (entry.get("dateOut") or "").strip():
@@ -200,7 +280,7 @@ def search_extremist_org(name: str) -> RegistryMatch | None:
         if not org_name:
             continue
         n_norm = _normalize(org_name)
-        if q_norm in n_norm or n_norm in q_norm or _match_organization(query, org_name):
+        if q_norm == n_norm or _match_organization(query, org_name):
             return RegistryMatch(
                 registry="extremist_orgs",
                 registry_title="Перечень экстремистских организаций (Минюст РФ)",

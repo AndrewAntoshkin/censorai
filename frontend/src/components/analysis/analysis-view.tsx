@@ -336,6 +336,10 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
   const violationScenes = analysis.scenes.filter((s) => s.risk);
   const summary = analysis.summary;
   const incomplete = looksIncomplete(summary, analysis, fileSize);
+  const foreignAgentHits =
+    summary?.registry_verifications?.filter(
+      (v) => v.registry_status === "in_registry" && v.registry === "foreign_agents"
+    ) ?? [];
 
   return (
     <AppLayout
@@ -519,6 +523,26 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                       </div>
                     )}
 
+                  <div className="border-t border-border pt-4">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Иноагенты (Минюст)
+                    </p>
+                    {foreignAgentHits.length > 0 ? (
+                      <ul className="space-y-1.5 text-xs">
+                        {foreignAgentHits.map((hit, i) => (
+                          <li key={i} className="text-foreground">
+                            <span className="font-medium">{hit.matched_registry_name}</span>
+                            {hit.name && hit.name !== hit.matched_registry_name && (
+                              <span className="text-muted-foreground"> — в кадре: {hit.name}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-success">Реальных совпадений не найдено</p>
+                    )}
+                  </div>
+
                   {summary.entities && summary.entities.length > 0 && (
                     <div className="border-t border-border pt-4">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -533,12 +557,6 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
                                 {" "}
                                 ({ENTITY_TYPE_LABELS[e.type] || e.type})
                               </span>
-                            )}
-                            {e.registry_status === "in_registry" && (
-                              <span className="ml-1 text-critical"> · в реестре</span>
-                            )}
-                            {e.registry_status === "not_in_registry" && (
-                              <span className="ml-1 text-success"> · не в реестре</span>
                             )}
                             {e.context && (
                               <span className="text-muted-foreground"> — {e.context}</span>
