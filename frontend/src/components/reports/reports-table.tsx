@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Film, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Film, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { VideoFileAPI } from "@/lib/api";
+import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { FileStatusBadge } from "@/components/shared/file-status-badge";
@@ -16,6 +16,7 @@ interface ReportsTableProps {
   files: VideoFileAPI[];
   emptyMessage?: string;
   onProjectAssigned?: (fileId: string, projectId: string) => void;
+  onFilesChanged?: (files: VideoFileAPI[]) => void;
   className?: string;
 }
 
@@ -35,10 +36,36 @@ export function ReportsTable({
   files,
   emptyMessage = "Пока нет готовых отчётов",
   onProjectAssigned,
+  onFilesChanged,
   className,
 }: ReportsTableProps) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [projects, setProjects] = useState<ProjectAPI[]>([]);
+  const [bulkProjectId, setBulkProjectId] = useState("");
+  const [busyAction, setBusyAction] = useState<"assign" | "delete" | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.projects
+      .list()
+      .then((items) => active && setProjects(items))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (files.some((f) => f.id === id)) next.add(id);
+      }
+      return next;
+    });
+  }, [files]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -60,6 +87,60 @@ export function ReportsTable({
     const start = (page - 1) * PAGE_SIZE;
     return filtered.slice(start, start + PAGE_SIZE);
   }, [filtered, page]);
+  const pageSelectedCount = pageItems.filter((f) => selectedIds.has(f.id)).length;
+  const allPageSelected = pageItems.length > 0 && pageSelectedCount === pageItems.length;
+
+  const toggleRow = (fileId: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(fileId);
+      else next.delete(fileId);
+      return next;
+    });
+  };
+
+  const togglePage = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of pageItems) {
+        if (checked) next.add(item.id);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkAssign = async () => {
+    if (!bulkProjectId || selectedIds.size === 0) return;
+    setBusyAction("assign");
+    try {
+      await Promise.all(
+        [...selectedIds].map((fileId) => api.files.assignToProject(fileId, bulkProjectId))
+      );
+      const next = files.map((file) =>
+        selectedIds.has(file.id) ? { ...file, project_id: bulkProjectId } : file
+      );
+      onFilesChanged?.(next);
+      setSelectedIds(new Set());
+      setBulkProjectId("");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Удалить выбранные отчёты (${selectedIds.size})?`)) return;
+    setBusyAction("delete");
+    try {
+      await Promise.all([...selectedIds].map((fileId) => api.files.delete(fileId)));
+      const next = files.filter((file) => !selectedIds.has(file.id));
+      onFilesChanged?.(next);
+      setSelectedIds(new Set());
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   const rangeStart = filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, filtered.length);
@@ -89,16 +170,59 @@ export function ReportsTable({
         />
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
+          <span className="text-xs text-muted-foreground">Выбрано: {selectedIds.size}</span>
+          <select
+            value={bulkProjectId}
+            onChange={(e) => setBulkProjectId(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+          >
+            <option value="">Выберите проект</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!bulkProjectId || busyAction !== null}
+            onClick={() => void handleBulkAssign()}
+          >
+            В проект
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busyAction !== null}
+            onClick={() => void handleBulkDelete()}
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" />
+            Удалить
+          </Button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-sm">
+        <div>
+          <table className="w-full table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+                <th className="w-10 px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={(e) => togglePage(e.target.checked)}
+                    aria-label="Выбрать все на странице"
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium">Название</th>
-                <th className="hidden w-28 px-4 py-3 font-medium sm:table-cell">
+                <th className="hidden w-28 px-4 py-3 font-medium md:table-cell">
                   Дата
                 </th>
-                <th className="w-40 px-4 py-3 font-medium">Статус</th>
+                <th className="w-36 px-4 py-3 font-medium">Статус</th>
                 <th className="w-12 px-2 py-3" aria-label="Действия" />
               </tr>
             </thead>
@@ -106,7 +230,7 @@ export function ReportsTable({
               {pageItems.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-sm text-muted-foreground"
                   >
                     Ничего не найдено
@@ -118,16 +242,25 @@ export function ReportsTable({
                     key={file.id}
                     className="border-b border-border last:border-0 transition-colors hover:bg-accent/50"
                   >
+                    <td className="px-2 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(file.id)}
+                        onChange={(e) => toggleRow(file.id, e.target.checked)}
+                        aria-label={`Выбрать ${file.name}`}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <Link
                         href={`/file/${file.id}`}
-                        className="flex min-w-0 items-center gap-2.5 font-medium text-foreground hover:text-primary"
+                        className="flex min-w-0 max-w-full items-center gap-2.5 font-medium text-foreground hover:text-primary"
+                        title={file.name}
                       >
                         <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{file.name}</span>
+                        <span className="block min-w-0 truncate">{file.name}</span>
                       </Link>
                     </td>
-                    <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                    <td className="hidden truncate px-4 py-3 text-muted-foreground md:table-cell">
                       {formatReportDate(file.created_at)}
                     </td>
                     <td className="px-4 py-3">

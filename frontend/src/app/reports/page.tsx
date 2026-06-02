@@ -53,6 +53,7 @@ export default function ReportsPage() {
           <ReportsTable
             files={reports}
             onProjectAssigned={handleProjectAssigned}
+            onFilesChanged={setReports}
             emptyMessage="Пока нет готовых отчётов. Загрузите видео и дождитесь анализа."
           />
         )}

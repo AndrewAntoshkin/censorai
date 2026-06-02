@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import { Upload, X, FileVideo, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
@@ -13,7 +13,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { api, type ProjectAPI } from "@/lib/api";
 import {
   MAX_CONCURRENT_UPLOADS,
   addPendingUploadJobs,
@@ -56,20 +55,6 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function UploadModal({ open, onOpenChange }: UploadModalProps) {
   const router = useRouter();
-  const [projects, setProjects] = useState<ProjectAPI[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    api.projects
-      .list()
-      .then((list) => active && setProjects(list))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [open]);
 
   const jobs = useSyncExternalStore(
     subscribeUploadJobs,
@@ -99,7 +84,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
 
   const uploadAndAnalyze = () => {
     const ids = pendingJobs.map((j) => j.id);
-    startUploadBatch(ids, selectedProjectId || undefined);
+    startUploadBatch(ids);
   };
 
   const handleClose = (isOpen: boolean) => {
@@ -156,26 +141,6 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
             )}
           </div>
         </div>
-
-        {pendingJobs.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <label className="text-xs font-medium text-muted-foreground">
-              Проект (необязательно)
-            </label>
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary/50"
-            >
-              <option value="">Без проекта</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {jobs.length > 0 && (
           <div className="mt-4 max-h-60 space-y-3 overflow-y-auto">

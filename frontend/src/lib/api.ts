@@ -239,6 +239,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
+    delete: (id: string) =>
+      request<void>(`/api/projects/${id}`, {
+        method: "DELETE",
+      }),
   },
 
   files: {
@@ -249,6 +253,10 @@ export const api = {
       request<VideoFileAPI>(`/api/files/${fileId}/project`, {
         method: "PATCH",
         body: JSON.stringify({ project_id: projectId }),
+      }),
+    delete: (fileId: string) =>
+      request<void>(`/api/files/${fileId}`, {
+        method: "DELETE",
       }),
     getAnalysis: (id: string) =>
       request<AnalysisAPI>(`/api/files/${id}/analysis`),

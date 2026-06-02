@@ -538,6 +538,20 @@ async def assign_file_to_project(
     return video
 
 
+@router.delete("/{file_id}", status_code=204)
+async def delete_file(file_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if video.storage_path:
+        await release_video_blob(video)
+
+    await db.delete(video)
+    await db.flush()
+
+
 @router.get("/recent", response_model=list[VideoFileResponse])
 async def recent_files(
     limit: int = 12,
