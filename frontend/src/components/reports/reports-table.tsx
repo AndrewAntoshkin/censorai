@@ -245,50 +245,61 @@ export function ReportsTable({
                   </td>
                 </tr>
               ) : (
-                pageItems.map((file) => (
-                  <tr
-                    key={file.id}
-                    className="border-b border-border last:border-0 transition-colors hover:bg-accent/50"
-                  >
-                    <td className="px-2 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(file.id)}
-                        onChange={(e) => toggleRow(file.id, e.target.checked)}
-                        aria-label={`Выбрать ${file.name}`}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/file/${file.id}`}
-                        className="flex min-w-0 max-w-full items-center gap-2.5 font-medium text-foreground hover:text-primary"
-                        title={file.name}
-                      >
-                        <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="block min-w-0 truncate">{file.name}</span>
-                      </Link>
-                    </td>
-                    <td className="hidden truncate px-4 py-3 text-muted-foreground md:table-cell">
-                      {formatReportDate(file.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <FileStatusBadge
-                        status={file.status}
-                        progress={file.progress}
-                        riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
-                      />
-                    </td>
-                    <td className="px-2 py-3 text-right">
-                      <AddToProjectMenu
-                        fileId={file.id}
-                        currentProjectId={file.project_id}
-                        onAssigned={(projectId) =>
-                          onProjectAssigned?.(file.id, projectId)
-                        }
-                      />
-                    </td>
-                  </tr>
-                ))
+                pageItems.map((file) => {
+                  const isInProgress = WORKING_STATUSES.has((file.status || "").toLowerCase());
+                  return (
+                    <tr
+                      key={file.id}
+                      className="border-b border-border last:border-0 transition-colors hover:bg-accent/50"
+                    >
+                      <td className="px-2 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(file.id)}
+                          onChange={(e) => toggleRow(file.id, e.target.checked)}
+                          aria-label={`Выбрать ${file.name}`}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        {isInProgress ? (
+                          <div
+                            className="flex min-w-0 max-w-full cursor-not-allowed items-center gap-2.5 font-medium text-muted-foreground"
+                            title="В работе"
+                          >
+                            <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="block min-w-0 truncate">{file.name}</span>
+                          </div>
+                        ) : (
+                          <Link
+                            href={`/file/${file.id}`}
+                            className="flex min-w-0 max-w-full items-center gap-2.5 font-medium text-foreground hover:text-primary"
+                            title={file.name}
+                          >
+                            <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="block min-w-0 truncate">{file.name}</span>
+                          </Link>
+                        )}
+                      </td>
+                      <td className="hidden truncate px-4 py-3 text-muted-foreground md:table-cell">
+                        {formatReportDate(file.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <FileStatusBadge
+                          status={file.status}
+                          progress={file.progress}
+                          riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                        />
+                      </td>
+                      <td className="px-2 py-3 text-right">
+                        <AddToProjectMenu
+                          fileId={file.id}
+                          currentProjectId={file.project_id}
+                          onAssigned={(projectId) => onProjectAssigned?.(file.id, projectId)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

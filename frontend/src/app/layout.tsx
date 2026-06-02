@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Onest, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { UploadUnloadGuard } from "@/components/upload/upload-unload-guard";
 
 const onest = Onest({
   variable: "--font-sans",
@@ -24,7 +25,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru" className={`${onest.variable} ${jetbrainsMono.variable} h-full antialiased`}>
-      <body className="min-h-full font-sans">{children}</body>
+      <body className="min-h-full font-sans">
+        <UploadUnloadGuard />
+        {children}
+      </body>
     </html>
   );
 }

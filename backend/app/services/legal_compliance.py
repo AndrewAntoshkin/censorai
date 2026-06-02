@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.services.legal_registry import (
     FOREIGN_AGENT_MARKING_TEMPLATE,
     RegistryMatch,
+    is_registry_query_supported,
     registry_status,
     search_entity,
 )
@@ -79,6 +80,8 @@ def verify_entities(entities: list[dict], markings: list[dict]) -> list[dict]:
     for entity in entities or []:
         name = (entity.get("name") or "").strip()
         if not name:
+            continue
+        if not is_registry_query_supported(name, entity.get("type")):
             continue
         key = name.lower()
         if key in seen:

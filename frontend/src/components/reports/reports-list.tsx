@@ -14,6 +14,8 @@ interface ReportsListProps {
   className?: string;
 }
 
+const WORKING_STATUSES = new Set(["uploading", "uploaded", "analyzing"]);
+
 export function ReportsList({
   files,
   emptyMessage = "Пока нет готовых отчётов",
@@ -41,6 +43,9 @@ export function ReportsList({
       )}
     >
       {files.map((file, i) => (
+        (() => {
+          const isInProgress = WORKING_STATUSES.has((file.status || "").toLowerCase());
+          return (
         <div
           key={file.id}
           className={cn(
@@ -48,25 +53,43 @@ export function ReportsList({
             i > 0 && "border-t border-border"
           )}
         >
-          <Link
-            href={`/file/${file.id}`}
-            className="flex min-w-0 flex-1 items-center gap-3"
-          >
-            <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate text-sm text-foreground">{file.name}</span>
-            <FileStatusBadge
-              status={file.status}
-              progress={file.progress}
-              riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
-              className="ml-auto shrink-0"
-            />
-          </Link>
+          {isInProgress ? (
+            <div
+              className="flex min-w-0 flex-1 cursor-not-allowed items-center gap-3"
+              title="В работе"
+            >
+              <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate text-sm text-muted-foreground">{file.name}</span>
+              <FileStatusBadge
+                status={file.status}
+                progress={file.progress}
+                riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                className="ml-auto shrink-0"
+              />
+            </div>
+          ) : (
+            <Link
+              href={`/file/${file.id}`}
+              className="flex min-w-0 flex-1 items-center gap-3"
+            >
+              <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate text-sm text-foreground">{file.name}</span>
+              <FileStatusBadge
+                status={file.status}
+                progress={file.progress}
+                riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                className="ml-auto shrink-0"
+              />
+            </Link>
+          )}
           <AddToProjectMenu
             fileId={file.id}
             currentProjectId={file.project_id}
             onAssigned={(projectId) => onProjectAssigned?.(file.id, projectId)}
           />
         </div>
+          );
+        })()
       ))}
     </div>
   );

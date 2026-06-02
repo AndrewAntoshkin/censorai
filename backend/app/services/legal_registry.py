@@ -116,6 +116,17 @@ def _query_too_ambiguous(query: str) -> bool:
     return len(_significant_tokens(query)) < 2
 
 
+def is_registry_query_supported(name: str, entity_type: str | None = None) -> bool:
+    tokens = _significant_tokens(name)
+    if not tokens:
+        return False
+    etype = (entity_type or "").lower()
+    if etype in {"organization", "media", "channel", "организация", "сми"}:
+        return len(tokens) >= 2
+    # Для физлиц проверяем только полное ФИО (фамилия+имя+отчество).
+    return len(tokens) >= 3
+
+
 # Платформы/бренды — не считаем «возможным иноагентом» по частичному совпадению.
 _MEDIA_SKIP = frozenset(
     {
@@ -194,6 +205,8 @@ def _match_full(query: str, entry_name: str) -> bool:
 
     if _looks_like_organization(entry_name):
         return all(any(nt == qt for qt in q_tokens) for nt in n_tokens)
+    if len(q_tokens) < 3:
+        return False
 
     return all(any(nt == qt for qt in q_tokens) for nt in n_tokens)
 
