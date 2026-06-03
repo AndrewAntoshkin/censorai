@@ -21,8 +21,19 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("App starting (database init deferred)")
-    yield
-    await engine.dispose()
+    dev_poll_task = None
+    if not os.getenv("VERCEL"):
+        from app.services.dev_analysis_poll import start_dev_poll_if_needed, stop_dev_poll
+
+        dev_poll_task = await start_dev_poll_if_needed()
+    try:
+        yield
+    finally:
+        if dev_poll_task is not None:
+            from app.services.dev_analysis_poll import stop_dev_poll
+
+            await stop_dev_poll()
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -78,9 +89,12 @@ async def health_check():
             "has_database_url": bool(os.getenv("DATABASE_URL", "").strip()),
             "has_postgres_url": bool(os.getenv("POSTGRES_URL", "").strip()),
             "has_storage_url": bool(os.getenv("STORAGE_URL", "").strip()),
+            "has_replicate_token": settings.analysis_ready,
+            "has_blob_token": bool(settings.BLOB_READ_WRITE_TOKEN.strip()),
             "replicate_max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
             "analysis_max_coverage_retries": settings.ANALYSIS_MAX_COVERAGE_RETRIES,
             "auth_required": settings.AUTH_REQUIRED,
+            "dev_analysis_poll": settings.DEV_ANALYSIS_POLL_ENABLED and not os.getenv("VERCEL"),
         },
         "db": database_status(),
     }

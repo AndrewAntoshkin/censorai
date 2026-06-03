@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     REPLICATE_API_TOKEN: str = ""
     REPLICATE_MODEL: str = "google/gemini-3.5-flash"
+    BLOB_READ_WRITE_TOKEN: str = ""
 
     UPLOAD_MAX_SIZE_MB: int = 500
     UPLOAD_DIR: str = "./uploads"
@@ -99,6 +100,8 @@ class Settings(BaseSettings):
     ANALYSIS_WORKER_POLL_SECONDS: int = 30
     # Dev-only manual poll (GET /api/worker/poll-once). Set in local .env; leave empty on Vercel.
     WORKER_DEV_POLL_SECRET: str = ""
+    # When Redis is down locally, API process polls analyzing videos in the background.
+    DEV_ANALYSIS_POLL_ENABLED: bool = True
     ANALYSIS_JOB_MAX_ATTEMPTS: int = 5
     ANALYSIS_STALE_JOB_HOURS: int = 6
     # ffmpeg scene-change hints appended to the model prompt (stage 4 pre-pass).
@@ -121,6 +124,10 @@ class Settings(BaseSettings):
     @property
     def public_api_base_url(self) -> str:
         return self.PUBLIC_API_BASE_URL.rstrip("/")
+
+    @property
+    def analysis_ready(self) -> bool:
+        return bool(self.REPLICATE_API_TOKEN.strip())
 
 
 settings = Settings()

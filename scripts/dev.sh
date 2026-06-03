@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+if [[ ! -f backend/.env.secrets ]]; then
+  echo "→ Local secrets (Vercel Sensitive vars need one-time copy)…"
+  python3 scripts/sync-local-env.py 2>/dev/null || true
+  [[ -f backend/.env.secrets ]] || ./scripts/import-secrets.sh 2>/dev/null || true
+fi
+
 if [[ ! -x backend/.venv/bin/uvicorn ]]; then
   echo "→ Создаём venv и ставим зависимости backend…"
   (cd backend && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt)

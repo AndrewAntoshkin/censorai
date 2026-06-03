@@ -1,6 +1,8 @@
 # Env & secrets
 .env
 backend/.env
+backend/.env.secrets
+backend/.env.vercel-pull
 *.pem
 
 # Python

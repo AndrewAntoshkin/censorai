@@ -129,6 +129,16 @@ async def _kickoff_analysis(
     )
     from app.services.video_analysis_provider import start_analysis
 
+    if not settings.REPLICATE_API_TOKEN.strip():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "REPLICATE_API_TOKEN не задан локально. "
+                "Скопируйте из Vercel (Production) в backend/.env.secrets "
+                "или запустите: ./scripts/import-secrets.sh"
+            ),
+        )
+
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
 

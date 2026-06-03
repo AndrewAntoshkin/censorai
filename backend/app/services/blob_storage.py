@@ -14,6 +14,8 @@ import os
 import httpx
 import vercel_blob
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Use multipart for larger payloads (merged videos) to avoid single-request limits.
@@ -21,7 +23,10 @@ _MULTIPART_THRESHOLD = 8 * 1024 * 1024
 
 
 def blob_enabled() -> bool:
-    return bool(os.getenv("BLOB_READ_WRITE_TOKEN", "").strip())
+    token = settings.BLOB_READ_WRITE_TOKEN.strip() or os.getenv(
+        "BLOB_READ_WRITE_TOKEN", ""
+    ).strip()
+    return bool(token)
 
 
 def put_bytes(

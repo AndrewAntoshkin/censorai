@@ -10,6 +10,7 @@ if not os.getenv("VERCEL"):
     from dotenv import load_dotenv
 
     load_dotenv(_BACKEND_ROOT / ".env")
+    load_dotenv(_BACKEND_ROOT / ".env.secrets", override=True)
 
 resolve_database_env()
 

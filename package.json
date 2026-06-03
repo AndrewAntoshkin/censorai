@@ -2,6 +2,8 @@
   "name": "censorai",
   "private": true,
   "scripts": {
+    "sync:env": "python3 scripts/sync-local-env.py",
+    "import:secrets": "./scripts/import-secrets.sh",
     "dev": "npm run dev --prefix frontend",
     "dev:backend": "cd backend && .venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000",
     "dev:frontend": "npm run dev --prefix frontend",
