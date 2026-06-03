@@ -419,4 +419,21 @@ export const api = {
   },
 
   health: () => request<{ status: string }>("/api/health"),
+
+  ops: {
+    metrics: () =>
+      request<{
+        video_provider: string;
+        object_storage: boolean;
+        cascade_enabled: boolean;
+        worker_poll_seconds: number;
+        videos_by_status: Record<string, number>;
+        jobs_by_status: Record<string, number>;
+        analyzing_count: number;
+        queued_jobs: number;
+        failed_jobs: number;
+        stale_analyzing: number;
+        max_job_attempts: number;
+      }>("/api/ops/metrics"),
+  },
 };

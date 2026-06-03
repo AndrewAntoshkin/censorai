@@ -9,10 +9,15 @@ from app.core.config import settings
 
 
 def _signing_secret() -> str:
-    token = settings.REPLICATE_API_TOKEN
-    if not token:
-        raise RuntimeError("REPLICATE_API_TOKEN is required for media signing")
-    return token
+    secret = settings.AUTH_SECRET.strip()
+    if secret and secret != "dev-change-me-in-production":
+        return secret
+    token = settings.REPLICATE_API_TOKEN.strip()
+    if token:
+        return token
+    raise RuntimeError(
+        "AUTH_SECRET or REPLICATE_API_TOKEN is required for replicate-media signing"
+    )
 
 
 def build_replicate_media_url(file_id: str, ttl_seconds: int | None = None) -> str:

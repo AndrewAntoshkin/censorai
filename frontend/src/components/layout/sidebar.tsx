@@ -17,6 +17,7 @@ import {
   FileText,
   HelpCircle,
   Loader2,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
@@ -229,6 +230,25 @@ export function Sidebar() {
               </Link>
             );
           })}
+        {user?.role === "super_admin" && (
+          <Link
+            href="/ops"
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+              pathname === "/ops"
+                ? "bg-primary/10 font-medium text-primary"
+                : "text-sidebar-foreground hover:bg-sidebar-accent"
+            )}
+          >
+            <Activity
+              className={cn(
+                "h-4 w-4 shrink-0",
+                pathname === "/ops" ? "text-primary" : "text-muted-foreground"
+              )}
+            />
+            <span>Операции</span>
+          </Link>
+        )}
       </nav>
 
       {/* Widgets */}

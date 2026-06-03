@@ -122,6 +122,13 @@ class GeminiService:
         if storage_path.startswith(("http://", "https://")):
             return storage_path
 
+        if storage_path.startswith("s3://"):
+            from app.services.object_storage import presigned_get_url
+
+            url = presigned_get_url(storage_path)
+            logger.info("Using presigned S3 URL for model input")
+            return url
+
         from pathlib import Path
 
         path = Path(storage_path)
@@ -164,9 +171,17 @@ class GeminiService:
         return f"data:{content_type};base64,{encoded}"
 
     def _model_input(
-        self, video_url: str, *, expected_duration_seconds: int | None = None
+        self,
+        video_url: str,
+        *,
+        expected_duration_seconds: int | None = None,
+        extra_prompt_suffix: str = "",
     ) -> dict:
-        prompt = ANALYSIS_PROMPT + full_coverage_prompt_suffix(expected_duration_seconds)
+        prompt = (
+            ANALYSIS_PROMPT
+            + full_coverage_prompt_suffix(expected_duration_seconds)
+            + (extra_prompt_suffix or "")
+        )
         payload = {
             "prompt": prompt,
             "videos": [video_url],
@@ -185,6 +200,7 @@ class GeminiService:
         file_id: str | None = None,
         file_size: int | None = None,
         expected_duration_seconds: int | None = None,
+        extra_prompt_suffix: str = "",
     ) -> str:
         """Start Replicate prediction without blocking (for serverless)."""
         video_uri = self.resolve_video_uri(
@@ -193,7 +209,9 @@ class GeminiService:
         prediction = self._client.predictions.create(
             model=settings.REPLICATE_MODEL,
             input=self._model_input(
-                video_uri, expected_duration_seconds=expected_duration_seconds
+                video_uri,
+                expected_duration_seconds=expected_duration_seconds,
+                extra_prompt_suffix=extra_prompt_suffix,
             ),
         )
         return prediction.id

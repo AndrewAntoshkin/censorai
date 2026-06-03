@@ -25,7 +25,8 @@ if redis-cli ping >/dev/null 2>&1; then
   (cd backend && .venv/bin/arq app.worker.WorkerSettings) &
   WORKER_PID=$!
 else
-  echo "⚠️  Redis offline — worker skipped (analysis only advances on page open)"
+  echo "⚠️  Redis offline — worker skipped"
+  echo "    Fallback: curl 'http://127.0.0.1:8000/api/worker/poll-once?secret=dev-poll-local'"
   WORKER_PID=""
 fi
 

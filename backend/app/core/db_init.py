@@ -105,6 +105,13 @@ def _migrate_columns() -> None:
                         "ALTER TABLE auth_sessions ADD COLUMN active_organization_id VARCHAR(36)"
                     )
                 )
+
+            job_cols = {
+                row[1] for row in conn.execute(sa.text("PRAGMA table_info(analysis_jobs)"))
+            }
+            if job_cols and "job_metadata" not in job_cols:
+                conn.execute(sa.text("ALTER TABLE analysis_jobs ADD COLUMN job_metadata TEXT"))
+                logger.info("Added analysis_jobs.job_metadata column")
         else:
             conn.execute(
                 sa.text(
@@ -164,8 +171,14 @@ def _migrate_columns() -> None:
                     "REFERENCES organizations(id) ON DELETE SET NULL"
                 )
             )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS job_metadata TEXT"
+                )
+            )
             logger.info(
-                "Ensured video_files, scenes, projects, users, auth_sessions columns"
+                "Ensured video_files, scenes, projects, users, auth_sessions, "
+                "analysis_jobs columns"
             )
 
 

@@ -142,7 +142,11 @@ export default function HomePage() {
             ))}
           </div>
         ) : activeTab === "reports" ? (
-          <ReportsList />
+          <ReportsList
+            files={recent.filter(
+              (f) => (f.status || "").toLowerCase() === "analyzed"
+            )}
+          />
         ) : projects.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center">
             <p className="text-sm text-muted-foreground">

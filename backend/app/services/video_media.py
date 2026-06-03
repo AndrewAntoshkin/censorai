@@ -31,7 +31,7 @@ def public_api_is_localhost() -> bool:
 
 
 def needs_public_video_url(storage_path: str, file_size: int | None) -> bool:
-    if storage_path.startswith(("http://", "https://")):
+    if storage_path.startswith(("http://", "https://", "s3://")):
         return False
     size_mb = effective_size_bytes(storage_path, file_size) / (1024 * 1024)
     return size_mb > settings.INLINE_VIDEO_MAX_MB

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import VideoFile
 from app.schemas.analysis import GeminiAnalysisResult
-from app.services.gemini_service import gemini_service
+from app.services.video_analysis_provider import poll_prediction
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,7 @@ async def maybe_finish_analysis(
 
     # Do not hold FOR UPDATE or a Neon connection during the Replicate HTTP call.
     try:
-        _status, result = await asyncio.to_thread(
-            gemini_service.poll_prediction, prediction_id
-        )
+        _status, result = await asyncio.to_thread(poll_prediction, prediction_id)
     except Exception as exc:
         await _handle_poll_error(video, db, file_id, exc)
         return
@@ -128,8 +126,10 @@ async def _handle_poll_error(
                 try:
                     from app.services.analysis_coverage import expected_duration_seconds
 
+                    from app.services.video_analysis_provider import start_analysis
+
                     new_id = await asyncio.to_thread(
-                        gemini_service.start_analysis,
+                        start_analysis,
                         locked.storage_path,
                         file_id=locked.id,
                         file_size=locked.size,

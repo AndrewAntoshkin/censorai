@@ -80,7 +80,8 @@ class Settings(BaseSettings):
 
     HTTPS_PROXY_URL: str = ""
 
-    VIDEO_PROVIDER: str = "replicate"  # "replicate" | "gemini"
+    # Production analysis always uses Replicate; other values are ignored with a warning.
+    VIDEO_PROVIDER: str = "replicate"
 
     API_PREFIX: str = _default_api_prefix()
 
@@ -96,6 +97,20 @@ class Settings(BaseSettings):
 
     # Background worker (arq) polls all analyzing videos — not only on frontend GET.
     ANALYSIS_WORKER_POLL_SECONDS: int = 30
+    # Dev-only manual poll (GET /api/worker/poll-once). Set in local .env; leave empty on Vercel.
+    WORKER_DEV_POLL_SECRET: str = ""
+    ANALYSIS_JOB_MAX_ATTEMPTS: int = 5
+    ANALYSIS_STALE_JOB_HOURS: int = 6
+    # ffmpeg scene-change hints appended to the model prompt (stage 4 pre-pass).
+    ANALYSIS_CASCADE_ENABLED: bool = False
+
+    # S3-compatible object storage (MinIO, R2, AWS). When set, uploads go to S3.
+    S3_ENDPOINT_URL: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_BUCKET: str = ""
+    S3_REGION: str = "auto"
+    S3_PRESIGN_TTL_SECONDS: int = 7200
 
     def route_prefix(self, path: str) -> str:
         segment = path if path.startswith("/") else f"/{path}"

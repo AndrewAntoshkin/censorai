@@ -1,12 +1,14 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.books import router as books_router
 from app.api.files import router as files_router
+from app.api.ops import router as ops_router
 from app.api.projects import router as projects_router
 from app.core.config import settings
 from app.core.database import engine
@@ -42,12 +44,20 @@ app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(files_router)
 app.include_router(books_router)
+app.include_router(ops_router)
 
 
 @app.get(settings.route_prefix("/worker/poll-once"))
-async def worker_poll_once():
-    """Manual trigger for analysis poll (dev); production uses arq worker."""
+async def worker_poll_once(secret: str | None = Query(None)):
+    """Manual poll tick for local dev. Requires WORKER_DEV_POLL_SECRET or non-Vercel host."""
     from app.services.analysis_orchestration import run_analysis_poll_cycle
+
+    expected = settings.WORKER_DEV_POLL_SECRET.strip()
+    if expected:
+        if secret != expected:
+            raise HTTPException(status_code=403, detail="Invalid worker poll secret")
+    elif os.getenv("VERCEL"):
+        raise HTTPException(status_code=404, detail="Not available")
 
     return await run_analysis_poll_cycle()
 

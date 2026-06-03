@@ -87,8 +87,27 @@ def _expected_duration(video: VideoFile) -> int | None:
     return expected_duration_seconds(video.size or 0, video.duration_seconds)
 
 
+async def _cascade_prompt_suffix(video: VideoFile) -> str:
+    if not settings.ANALYSIS_CASCADE_ENABLED:
+        return ""
+    from app.services.cascade_media import cleanup_temp_path, resolve_local_video_path
+    from app.services.scene_detection import detect_scene_timestamps, scene_hints_for_prompt
+
+    local_path, temp_file = await asyncio.to_thread(
+        resolve_local_video_path, video.storage_path or ""
+    )
+    if not local_path:
+        return ""
+    try:
+        timestamps = await asyncio.to_thread(detect_scene_timestamps, local_path)
+        return scene_hints_for_prompt(timestamps)
+    finally:
+        if temp_file is not None:
+            await asyncio.to_thread(cleanup_temp_path, temp_file)
+
+
 async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
-    """Start a new Replicate run when the previous output did not cover the full file."""
+    """Start a new run when the previous output did not cover the full file."""
     if not video.storage_path:
         return
     video.status = "analyzing"
@@ -96,62 +115,67 @@ async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
     video.analysis_id = None
     video.replicate_prediction_id = None
     await db.flush()
+    await _kickoff_analysis(video, db, from_queue=True)
 
-    await ensure_public_video_url(video, db)
-    prediction_id = await asyncio.to_thread(
-        gemini_service.start_analysis,
-        video.storage_path,
-        file_id=video.id,
-        file_size=video.size,
-        expected_duration_seconds=_expected_duration(video),
+
+async def _kickoff_analysis(
+    video: VideoFile, db: AsyncSession, *, from_queue: bool = False
+) -> None:
+    """Queue job, then start non-blocking Replicate prediction."""
+    from app.services.analysis_jobs import (
+        ensure_processing_job,
+        ensure_queued_job,
+        mark_job_failed,
     )
-    video.replicate_prediction_id = prediction_id
-    video.progress = min((video.progress or 0) + 5, 85)
-    await db.flush()
-    from app.services.analysis_jobs import ensure_processing_job
+    from app.services.video_analysis_provider import start_analysis
 
-    await ensure_processing_job(db, video.id)
-
-
-async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
-    """Start non-blocking Replicate prediction (Blob URL or local path)."""
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
 
     path = Path(video.storage_path)
-    if not video.storage_path.startswith(("http://", "https://")) and not path.exists():
+    if (
+        not video.storage_path.startswith(("http://", "https://", "s3://"))
+        and not path.exists()
+    ):
         raise HTTPException(
             status_code=503,
-            detail="Video file not found on server. Use Blob upload on Vercel.",
+            detail="Video file not found on server. Use Blob or S3 upload.",
         )
 
+    if not from_queue:
+        await ensure_queued_job(db, video.id)
+
     video.status = "analyzing"
-    video.progress = 20
-    video.analysis_attempts = 0
+    video.progress = 20 if not from_queue else max(video.progress or 0, 20)
+    if not from_queue:
+        video.analysis_attempts = 0
     await db.flush()
+
+    extra_prompt = await _cascade_prompt_suffix(video)
 
     try:
         await ensure_public_video_url(video, db)
         prediction_id = await asyncio.to_thread(
-            gemini_service.start_analysis,
+            start_analysis,
             video.storage_path,
             file_id=video.id,
             file_size=video.size,
             expected_duration_seconds=_expected_duration(video),
+            extra_prompt_suffix=extra_prompt,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to start analysis for file %s", video.id)
         video.status = "error"
         video.replicate_prediction_id = None
+        await mark_job_failed(db, video.id, str(exc))
         await db.flush()
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
 
     video.replicate_prediction_id = prediction_id
     video.progress = 30
     await db.flush()
-
-    from app.services.analysis_jobs import ensure_processing_job
-
     await ensure_processing_job(db, video.id)
 
 
@@ -161,9 +185,14 @@ def _utc_naive_now() -> datetime:
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
+    pred = video.replicate_prediction_id or ""
+    if pred.startswith("direct:"):
+        video.replicate_prediction_id = None
+        await db.flush()
+        pred = ""
     if (
         video.status == "analyzing"
-        and not video.replicate_prediction_id
+        and not pred
         and video.storage_path
     ):
         logger.warning(
@@ -240,6 +269,7 @@ async def _save_analysis_result(
     video.status = "analyzed"
     video.progress = 100
     video.analysis_id = analysis.id
+    video.replicate_prediction_id = None
     await db.flush()
 
     from app.services.analysis_jobs import mark_job_completed
@@ -777,10 +807,18 @@ async def replicate_media(
     if not video or not video.storage_path:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if video.storage_path.startswith(("http://", "https://")):
+    storage = video.storage_path
+    if storage.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Remote storage path cannot be streamed")
 
-    path = Path(video.storage_path)
+    if storage.startswith("s3://"):
+        from fastapi.responses import RedirectResponse
+
+        from app.services.object_storage import presigned_get_url
+
+        return RedirectResponse(presigned_get_url(storage), status_code=302)
+
+    path = Path(storage)
     if not path.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
 

@@ -7,24 +7,34 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import async_session_factory
 from app.core.db_init import ensure_database
+from app.models.analysis_job import AnalysisJob, AnalysisJobStatus
 from app.models.project import VideoFile
+from app.services.analysis_jobs import recover_stale_jobs
 
 logger = logging.getLogger(__name__)
 
-# Cap work per tick so a large backlog cannot block the worker for minutes.
 MAX_FILES_PER_TICK = 50
+MAX_QUEUED_KICKOFFS = 10
 
 
 async def run_analysis_poll_cycle() -> dict:
-    """Poll Replicate and recover stuck analyses for all in-flight videos."""
+    """Poll in-flight analyses, drain queued jobs, recover stale work."""
     await ensure_database()
 
     processed = 0
     errors = 0
+    recovered = 0
+    queued_started = 0
+    pending = 0
 
     async with async_session_factory() as db:
+        recovered = await recover_stale_jobs(db)
+        queued_started = await _process_queued_kickoffs(db)
+        await db.commit()
+
         result = await db.execute(
             select(VideoFile.id)
             .where(VideoFile.status == "analyzing")
@@ -32,9 +42,7 @@ async def run_analysis_poll_cycle() -> dict:
             .limit(MAX_FILES_PER_TICK)
         )
         file_ids = list(result.scalars().all())
-
-        if not file_ids:
-            return {"processed": 0, "errors": 0, "pending": 0}
+        pending = len(file_ids)
 
         for file_id in file_ids:
             try:
@@ -46,17 +54,67 @@ async def run_analysis_poll_cycle() -> dict:
                 await db.rollback()
                 logger.exception("Worker failed for file %s", file_id)
 
-    return {
+    stats = {
         "processed": processed,
         "errors": errors,
-        "pending": len(file_ids),
+        "recovered": recovered,
+        "queued_started": queued_started,
+        "pending": pending,
     }
+    if pending or recovered or queued_started:
+        logger.info("Poll tick: %s", stats)
+    return stats
+
+
+async def _process_queued_kickoffs(db: AsyncSession) -> int:
+    """Start analysis for queued uploads; one worker wins per row (SKIP LOCKED)."""
+    from app.api.files import _kickoff_analysis
+
+    candidates = await db.execute(
+        select(VideoFile.id)
+        .join(AnalysisJob, AnalysisJob.video_file_id == VideoFile.id)
+        .where(
+            AnalysisJob.status == AnalysisJobStatus.QUEUED.value,
+            VideoFile.status.in_(["uploaded", "analyzing"]),
+            VideoFile.replicate_prediction_id.is_(None),
+        )
+        .order_by(AnalysisJob.updated_at.asc())
+        .limit(MAX_QUEUED_KICKOFFS)
+    )
+    started = 0
+    for file_id in candidates.scalars().all():
+        row = await db.execute(
+            select(VideoFile)
+            .where(VideoFile.id == file_id)
+            .with_for_update(skip_locked=True)
+        )
+        video = row.scalar_one_or_none()
+        if video is None:
+            continue
+        if video.replicate_prediction_id or video.status not in ("uploaded", "analyzing"):
+            continue
+        job_row = await db.execute(
+            select(AnalysisJob).where(AnalysisJob.video_file_id == file_id)
+        )
+        job = job_row.scalar_one_or_none()
+        if job is None or job.status != AnalysisJobStatus.QUEUED.value:
+            continue
+        try:
+            await _kickoff_analysis(video, db, from_queue=True)
+            started += 1
+        except Exception:
+            logger.exception("Queued kickoff failed for %s", file_id)
+    return started
 
 
 async def _process_one(file_id: str, db: AsyncSession) -> None:
     from app.api.files import _maybe_finish_analysis
 
-    row = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+    row = await db.execute(
+        select(VideoFile)
+        .where(VideoFile.id == file_id)
+        .with_for_update(skip_locked=True)
+    )
     video = row.scalar_one_or_none()
     if video is None or video.status != "analyzing":
         return
