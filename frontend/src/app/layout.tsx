@@ -3,6 +3,7 @@ import { Onest } from "next/font/google";
 import "./globals.css";
 import { UploadUnloadGuard } from "@/components/upload/upload-unload-guard";
 import { AuthProvider } from "@/contexts/auth-context";
+import { WorkspaceProvider } from "@/contexts/workspace-context";
 import { ThemeProvider } from "@/contexts/theme-context";
 
 const onest = Onest({
@@ -32,8 +33,10 @@ export default function RootLayout({
       <body className="min-h-full font-sans">
         <ThemeProvider>
           <AuthProvider>
-            <UploadUnloadGuard />
-            {children}
+            <WorkspaceProvider>
+              <UploadUnloadGuard />
+              {children}
+            </WorkspaceProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

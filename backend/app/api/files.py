@@ -660,7 +660,6 @@ async def recent_files(
     # no need to re-check it on every request.
     stmt = (
         select(VideoFile)
-        .options(selectinload(VideoFile.analysis))
         .order_by(VideoFile.created_at.desc())
         .limit(max(1, min(limit, 100)))
     )

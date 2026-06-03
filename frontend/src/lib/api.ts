@@ -326,6 +326,17 @@ export const api = {
       }),
   },
 
+  workspace: {
+    summary: (recentLimit = 24) =>
+      request<{
+        projects: ProjectAPI[];
+        recent_files: VideoFileAPI[];
+        in_progress_count: number;
+      }>(`/api/workspace/summary?recent_limit=${recentLimit}`, {
+        timeoutMs: 15_000,
+      }),
+  },
+
   projects: {
     list: () => request<ProjectAPI[]>("/api/projects"),
     get: (id: string) => request<ProjectAPI>(`/api/projects/${id}`),

@@ -3,57 +3,19 @@
 import { AppLayout } from "@/components/layout/app-layout";
 import { Search, Folder, LayoutGrid, List } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
-import { useAuth } from "@/contexts/auth-context";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { ReportsList } from "@/components/reports/reports-list";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 export default function HomePage() {
-  const { user, config, loading: authLoading } = useAuth();
+  const { projects, recentFiles, loading, error } = useWorkspace();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [activeTab, setActiveTab] = useState<"projects" | "reports">("projects");
-  const [projects, setProjects] = useState<ProjectAPI[]>([]);
-  const [recent, setRecent] = useState<VideoFileAPI[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (config?.auth_required && !user) {
-      setLoading(false);
-      return;
-    }
-
-    let active = true;
-
-    async function loadHome() {
-      setLoadError(null);
-      try {
-        const [p, r] = await Promise.all([
-          api.projects.list(),
-          api.files.recent(12, { analyzedOnly: false }),
-        ]);
-        if (!active) return;
-        setProjects(p);
-        setRecent(r);
-      } catch (err) {
-        if (!active) return;
-        setLoadError(
-          err instanceof Error ? err.message : "Не удалось загрузить данные"
-        );
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    void loadHome();
-    return () => {
-      active = false;
-    };
-  }, [authLoading, user, config?.auth_required]);
+  const recent = recentFiles;
 
   return (
     <AppLayout breadcrumb={[{ label: "Главная" }]}>
@@ -76,9 +38,9 @@ export default function HomePage() {
           />
         </div>
 
-        {loadError && (
+        {error && (
           <p className="text-sm text-destructive">
-            {loadError}. Проверьте, что backend запущен на порту 8000.
+            {error}. Обновите страницу или проверьте соединение с API.
           </p>
         )}
 
@@ -135,7 +97,7 @@ export default function HomePage() {
           )}
         </div>
 
-        {loading ? (
+        {loading && projects.length === 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-28 rounded-xl" />

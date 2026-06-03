@@ -20,7 +20,7 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { getUploadJobsSnapshot, subscribeUploadJobs } from "@/lib/upload-jobs";
 import { useAuth } from "@/contexts/auth-context";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
@@ -79,9 +79,7 @@ function profileInitials(name: string): string {
 export function Sidebar() {
   const pathname = usePathname();
   const { user, loading: authLoading } = useAuth();
-  const [projects, setProjects] = useState<ProjectAPI[]>([]);
-  const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>([]);
-  const [backendInProgressCount, setBackendInProgressCount] = useState(0);
+  const { projects, recentFiles, inProgressCount: backendInProgressCount } = useWorkspace();
   const [readyToasts, setReadyToasts] = useState<Array<{ id: string; fileId: string; name: string }>>(
     []
   );
@@ -91,44 +89,6 @@ export function Sidebar() {
     getUploadJobsSnapshot,
     getUploadJobsSnapshot
   );
-
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      setProjects([]);
-      setRecentFiles([]);
-      setBackendInProgressCount(0);
-      return;
-    }
-
-    let active = true;
-    const load = async () => {
-      try {
-        const [p, r, inProgressList] = await Promise.all([
-          api.projects.list(),
-          api.files.recent(6, { analyzedOnly: false }),
-          api.files.recent(24, { analyzedOnly: false }),
-        ]);
-        if (!active) return;
-        const inProgress = inProgressList.filter((f) =>
-          ["uploading", "uploaded", "analyzing"].includes((f.status || "").toLowerCase())
-        ).length;
-        setBackendInProgressCount(inProgress);
-        setProjects(p);
-        setRecentFiles(r);
-      } catch {
-        if (!active) return;
-      }
-    };
-    void load();
-    const poll = window.setInterval(() => {
-      void load();
-    }, 10_000);
-    return () => {
-      active = false;
-      window.clearInterval(poll);
-    };
-  }, [authLoading, user]);
 
   useEffect(() => {
     const done = jobs.filter((j) => j.status === "done" && j.fileId);
@@ -272,7 +232,7 @@ export function Sidebar() {
         </Widget>
 
         <Widget title="Недавние" count={recentFiles.length}>
-          {recentFiles.map((file) => (
+          {recentFiles.slice(0, 6).map((file) => (
             <Link
               key={file.id}
               href={`/file/${file.id}`}
