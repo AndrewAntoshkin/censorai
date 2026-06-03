@@ -126,7 +126,7 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
                   (window.location.hostname === "localhost" ||
                     window.location.hostname === "127.0.0.1") && (
                     <p className="text-xs text-muted-foreground">
-                      Локально для роликов &gt;4 МБ нужен BLOB_READ_WRITE_TOKEN в backend/.env
+                      Локально &gt;4 МБ: BLOB_READ_WRITE_TOKEN в backend/.env.secrets
                     </p>
                   )}
               </>

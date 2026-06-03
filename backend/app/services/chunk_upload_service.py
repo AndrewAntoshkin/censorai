@@ -15,8 +15,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.upload_chunk_part import UploadChunkPart
 from app.models.upload_session import UploadChunkSession
-from app.services.blob_storage import blob_enabled, delete_urls, fetch_bytes, put_bytes
+from app.services.blob_storage import (
+    blob_enabled,
+    blob_write_available,
+    delete_urls,
+    fetch_bytes,
+    put_bytes,
+)
+
+CHUNK_SESSION_PREFIX = "chunk-session:"
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +63,14 @@ def _use_db_sessions() -> bool:
     return "postgres" in settings.DATABASE_URL
 
 
+def _use_pg_parts() -> bool:
+    """Store 3 MB parts in Postgres on Vercel (shared across invocations, saves Blob quota)."""
+    return _use_db_sessions() and bool(os.getenv("VERCEL"))
+
+
 def _use_blob_parts() -> bool:
+    if _use_pg_parts():
+        return False
     return blob_enabled() and bool(os.getenv("VERCEL"))
 
 
@@ -156,10 +172,63 @@ def _db_load(session_id: str) -> UploadSession:
 def _db_delete(session_id: str) -> None:
     engine = _sync_engine()
     with Session(engine) as db:
+        db.query(UploadChunkPart).filter(UploadChunkPart.session_id == session_id).delete()
         row = db.get(UploadChunkSession, session_id)
         if row:
             db.delete(row)
             db.commit()
+
+
+def _pg_save_part(session_id: str, part: int, content: bytes) -> None:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        row = db.get(UploadChunkPart, (session_id, part))
+        if row is None:
+            row = UploadChunkPart(
+                session_id=session_id,
+                part_index=part,
+                data=content,
+                size=len(content),
+            )
+            db.add(row)
+        else:
+            row.data = content
+            row.size = len(content)
+        db.commit()
+
+
+def _pg_read_part(session_id: str, part: int) -> bytes:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        row = db.get(UploadChunkPart, (session_id, part))
+        if row is None:
+            raise ValueError(f"Missing postgres chunk {part} for {session_id}")
+        return bytes(row.data)
+
+
+def _pg_delete_parts(session_id: str) -> None:
+    engine = _sync_engine()
+    with Session(engine) as db:
+        db.query(UploadChunkPart).filter(UploadChunkPart.session_id == session_id).delete()
+        db.commit()
+
+
+def is_chunk_session_path(storage_path: str | None) -> bool:
+    return bool(storage_path and storage_path.startswith(CHUNK_SESSION_PREFIX))
+
+
+def chunk_session_id(storage_path: str) -> str:
+    return storage_path[len(CHUNK_SESSION_PREFIX) :]
+
+
+def release_chunk_session(storage_path: str | None) -> bool:
+    if not is_chunk_session_path(storage_path):
+        return False
+    sid = chunk_session_id(storage_path)
+    _pg_delete_parts(sid)
+    _db_delete(sid)
+    logger.info("Released postgres chunk session %s", sid)
+    return True
 
 
 def _save_session(session: UploadSession) -> None:
@@ -231,7 +300,9 @@ def save_part(session_id: str, part: int, content: bytes) -> UploadSession:
     if len(content) > max_part_size + 1024:
         raise ValueError(f"Chunk {part} too large: {len(content)} bytes")
 
-    if _use_blob_parts():
+    if _use_pg_parts():
+        _pg_save_part(session.session_id, part, content)
+    elif _use_blob_parts():
         result = put_bytes(
             session._part_blob_path(part),
             content,
@@ -253,32 +324,53 @@ def merge_session(session_id: str) -> tuple[str | Path, UploadSession]:
     if missing:
         raise ValueError(f"Missing chunks: {missing[:5]}")
 
-    if _use_blob_parts():
+    if _use_pg_parts() or _use_blob_parts():
         merged = bytearray()
         for part in range(session.total_parts):
-            url = session.part_urls.get(part)
-            if not url:
-                raise ValueError(f"Missing blob URL for chunk {part}")
-            merged.extend(fetch_bytes(url))
+            if _use_pg_parts():
+                merged.extend(_pg_read_part(session.session_id, part))
+            else:
+                url = session.part_urls.get(part)
+                if not url:
+                    raise ValueError(f"Missing blob URL for chunk {part}")
+                merged.extend(fetch_bytes(url))
 
         if len(merged) != session.size:
             raise ValueError(
                 f"Assembled size mismatch: got {len(merged)}, expected {session.size}"
             )
 
-        ext = "mp4"
-        if "." in session.filename:
-            ext = session.filename.rsplit(".", 1)[-1].lower() or "mp4"
-        final_path = f"videos/{uuid.uuid4()}.{ext}"
-        result = put_bytes(
-            final_path,
-            bytes(merged),
-            content_type="video/mp4",
-            add_random_suffix=True,
+        if _use_blob_parts():
+            delete_urls(list(session.part_urls.values()))
+
+        if blob_write_available():
+            ext = "mp4"
+            if "." in session.filename:
+                ext = session.filename.rsplit(".", 1)[-1].lower() or "mp4"
+            final_path = f"videos/{uuid.uuid4()}.{ext}"
+            result = put_bytes(
+                final_path,
+                bytes(merged),
+                content_type="video/mp4",
+                add_random_suffix=True,
+            )
+            if _use_pg_parts():
+                _pg_delete_parts(session.session_id)
+            cleanup_session(session_id)
+            return result["url"], session
+
+        if _use_pg_parts():
+            logger.warning(
+                "Blob quota unavailable; keeping chunk-session %s in Postgres (%d bytes)",
+                session.session_id,
+                session.size,
+            )
+            return f"{CHUNK_SESSION_PREFIX}{session.session_id}", session
+
+        raise RuntimeError(
+            "Vercel Blob переполнен — не удалось сохранить собранный файл. "
+            "Очистите Blob в Vercel Dashboard."
         )
-        delete_urls(list(session.part_urls.values()))
-        cleanup_session(session_id)
-        return result["url"], session
 
     merged_path = session.dir / "merged.bin"
     with merged_path.open("wb") as out:

@@ -42,7 +42,8 @@ python3 test_analyze.py /path/to/video.mp4
 
 Фронт + API на одном домене. Загрузка и Replicate работают после деплоя.
 
-**Инструкция:** [scripts/vercel-setup.md](scripts/vercel-setup.md)
+**Первичная настройка:** [scripts/vercel-setup.md](scripts/vercel-setup.md)  
+**Каждый деплой (чеклист):** [docs/DEPLOY.md](docs/DEPLOY.md)
 
 Кратко:
 1. https://vercel.com/new → Import `AndrewAntoshkin/censorai`

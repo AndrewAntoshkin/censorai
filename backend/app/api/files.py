@@ -1,11 +1,13 @@
 import asyncio
+import json
 import logging
 import mimetypes
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -161,18 +163,38 @@ async def _kickoff_analysis(
         video.analysis_attempts = 0
     await db.flush()
 
-    extra_prompt = await _cascade_prompt_suffix(video)
+    from app.services.segmented_analysis import (
+        prepare_segmented_job,
+        should_segment,
+        start_segment_prediction,
+    )
+
+    do_segment, total_seconds = await should_segment(video)
+    if total_seconds and (not video.duration_seconds or video.duration_seconds < 30):
+        video.duration_seconds = float(total_seconds)
+        await db.flush()
+    extra_prompt = await _cascade_prompt_suffix(video) if not do_segment else ""
 
     try:
-        await ensure_public_video_url(video, db)
-        prediction_id = await asyncio.to_thread(
-            start_analysis,
-            video.storage_path,
-            file_id=video.id,
-            file_size=video.size,
-            expected_duration_seconds=_expected_duration(video),
-            extra_prompt_suffix=extra_prompt,
-        )
+        if do_segment and total_seconds:
+            metadata = await prepare_segmented_job(
+                video,
+                db,
+                total_seconds=total_seconds,
+                extra_prompt_suffix=extra_prompt,
+            )
+            prediction_id = await start_segment_prediction(video, db, metadata, 0)
+            video.progress = 28
+        else:
+            await ensure_public_video_url(video, db)
+            prediction_id = await asyncio.to_thread(
+                start_analysis,
+                video.storage_path,
+                file_id=video.id,
+                file_size=video.size,
+                expected_duration_seconds=_expected_duration(video),
+                extra_prompt_suffix=extra_prompt,
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -544,7 +566,10 @@ async def complete_chunk_upload(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    cleanup_session(session_id)
+    from app.services.chunk_upload_service import is_chunk_session_path
+
+    if not is_chunk_session_path(storage_path):
+        cleanup_session(session_id)
 
     video = VideoFile(
         name=session.filename,
@@ -565,6 +590,44 @@ async def complete_chunk_upload(
         await db.refresh(video)
 
     return video
+
+
+@router.post("/blob-upload")
+async def blob_client_upload(request: Request):
+    """Client-side Vercel Blob uploads (token exchange + completion webhook)."""
+    if not settings.BLOB_READ_WRITE_TOKEN.strip() and not os.getenv(
+        "BLOB_READ_WRITE_TOKEN", ""
+    ).strip():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "BLOB_READ_WRITE_TOKEN не настроен. "
+                "Подключите Blob store к проекту на Vercel."
+            ),
+        )
+    raw = await request.body()
+    try:
+        raw_text = raw.decode("utf-8")
+        body = json.loads(raw_text)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+
+    from app.services.blob_client_upload import handle_blob_upload_request
+
+    try:
+        result = await handle_blob_upload_request(
+            body,
+            request_url=str(request.url),
+            signature_header=request.headers.get("x-vercel-signature"),
+            raw_body=raw_text,
+        )
+        return JSONResponse(result)
+    except RuntimeError as exc:
+        logger.warning("blob-upload failed: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("blob-upload error")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/from-blob", response_model=VideoFileResponse, status_code=201)
@@ -603,6 +666,7 @@ async def register_from_blob(
         project_id=resolved_project_id,
         folder_id=folder_id,
         storage_path=data.blob_url,
+        duration_seconds=data.duration_seconds,
     )
     db.add(video)
     await db.flush()
@@ -836,6 +900,30 @@ async def replicate_media(
     storage = video.storage_path
     if storage.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Remote storage path cannot be streamed")
+
+    if storage.startswith("chunk-session:"):
+        from app.services.chunk_upload_service import (
+            _load_session,
+            _pg_read_part,
+            chunk_session_id,
+        )
+
+        session_id = chunk_session_id(storage)
+
+        def iter_parts():
+            session = _load_session(session_id)
+            for part in range(session.total_parts):
+                yield _pg_read_part(session_id, part)
+
+        media_type = mimetypes.guess_type(video.name)[0] or "video/mp4"
+        return StreamingResponse(
+            iter_parts(),
+            media_type=media_type,
+            headers={
+                "Content-Length": str(video.size),
+                "Content-Disposition": f'inline; filename="{video.name}"',
+            },
+        )
 
     if storage.startswith("s3://"):
         from fastapi.responses import RedirectResponse

@@ -45,14 +45,20 @@ function readCache(): {
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
-  const cached = readCache();
-  const [projects, setProjects] = useState<ProjectAPI[]>(cached?.projects ?? []);
-  const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>(
-    cached?.recent_files ?? []
-  );
-  const [inProgressCount, setInProgressCount] = useState(cached?.in_progress_count ?? 0);
-  const [loading, setLoading] = useState(!cached?.projects?.length);
+  const [projects, setProjects] = useState<ProjectAPI[]>([]);
+  const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>([]);
+  const [inProgressCount, setInProgressCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const cached = readCache();
+    if (!cached?.projects?.length) return;
+    setProjects(cached.projects);
+    setRecentFiles(cached.recent_files);
+    setInProgressCount(cached.in_progress_count ?? 0);
+    setLoading(false);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!user) {

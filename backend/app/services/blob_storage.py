@@ -29,6 +29,34 @@ def blob_enabled() -> bool:
     return bool(token)
 
 
+_BLOB_WRITE_OK: bool | None = None
+
+
+def blob_write_available() -> bool:
+    """False when Blob store cannot accept new writes (e.g. Hobby 1 GB quota)."""
+    global _BLOB_WRITE_OK
+    if _BLOB_WRITE_OK is not None:
+        return _BLOB_WRITE_OK
+    if not blob_enabled():
+        _BLOB_WRITE_OK = False
+        return False
+    try:
+        put_bytes(
+            "selftest/probe-write.txt",
+            b"ok",
+            add_random_suffix=True,
+        )
+        _BLOB_WRITE_OK = True
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "quota" in msg or "suspended" in msg:
+            logger.warning("Blob writes unavailable: %s", str(exc)[:200])
+            _BLOB_WRITE_OK = False
+        else:
+            raise
+    return _BLOB_WRITE_OK
+
+
 def put_bytes(
     pathname: str,
     data: bytes,

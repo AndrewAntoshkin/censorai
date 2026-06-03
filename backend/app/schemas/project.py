@@ -55,6 +55,7 @@ class BlobUploadRequest(BaseModel):
     blob_url: str
     filename: str
     size: int
+    duration_seconds: float | None = None
 
 
 class ChunkUploadInitRequest(BaseModel):

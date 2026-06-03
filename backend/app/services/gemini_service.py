@@ -122,6 +122,13 @@ class GeminiService:
         if storage_path.startswith(("http://", "https://")):
             return storage_path
 
+        if storage_path.startswith("chunk-session:"):
+            if not file_id:
+                raise RuntimeError(
+                    "chunk-session storage requires file_id for replicate-media URL"
+                )
+            return build_replicate_media_url(file_id)
+
         if storage_path.startswith("s3://"):
             from app.services.object_storage import presigned_get_url
 

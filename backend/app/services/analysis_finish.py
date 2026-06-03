@@ -90,6 +90,12 @@ async def _persist_result(
         return
 
     try:
+        from app.services.segmented_analysis import advance_after_segment
+
+        if await advance_after_segment(
+            video, db, result, save_merged=save_result
+        ):
+            return
         saved = await save_result(video, db, result)
         if saved is None:
             return

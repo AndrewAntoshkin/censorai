@@ -9,6 +9,7 @@ from app.core.db_url import resolve_database_env
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if not os.getenv("VERCEL"):
     load_dotenv(_BACKEND_ROOT / ".env")
+    load_dotenv(_BACKEND_ROOT / ".env.secrets", override=True)
 
 resolve_database_env()
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Onest } from "next/font/google";
 import "./globals.css";
 import { UploadUnloadGuard } from "@/components/upload/upload-unload-guard";
@@ -23,14 +24,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru" className={`${onest.variable} h-full antialiased`} suppressHydrationWarning>
-      <head>
-        <script
+      <body className="min-h-full font-sans">
+        <Script
+          id="fc-theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem("fc-theme");if(t==="dark")document.documentElement.classList.add("dark");}catch(e){}})();`,
           }}
         />
-      </head>
-      <body className="min-h-full font-sans">
         <ThemeProvider>
           <AuthProvider>
             <WorkspaceProvider>

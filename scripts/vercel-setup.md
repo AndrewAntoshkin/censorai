@@ -1,5 +1,7 @@
 # Деплой на Vercel (Services)
 
+> **Повторяемый процесс (commit → push → deploy → проверки):** [docs/DEPLOY.md](../docs/DEPLOY.md)
+
 ## 1. Import
 
 1. https://vercel.com/new → Import `AndrewAntoshkin/censorai`
@@ -30,7 +32,7 @@ curl https://censorai.vercel.app/api/health
 1. Vercel Dashboard → **Storage** → **Blob**
 2. Подключите к проекту → появится `BLOB_READ_WRITE_TOKEN`
 
-На проде фронт грузит видео **напрямую в Blob** (`/upload/blob`), затем регистрирует URL через `/api/files/from-blob?auto_analyze=1`. Chunk-upload на Vercel больше не используется.
+На проде: браузер → **Vercel Blob** (multipart), токен с `POST /api/files/blob-upload` (backend). Затем `POST /api/files/from-blob?auto_analyze=1`. При переполнении Blob — fallback: chunk-upload в Postgres. См. [docs/DEPLOY.md](../docs/DEPLOY.md).
 
 ## 3. Переменные окружения
 
@@ -45,6 +47,8 @@ curl https://censorai.vercel.app/api/health
 | `PUBLIC_API_BASE_URL` | `https://censorai.vercel.app` (опционально, для signed URL >100 МБ) |
 
 ## 4. Deploy
+
+См. полный чеклист: [docs/DEPLOY.md](../docs/DEPLOY.md).
 
 После деплоя:
 - UI: `https://censorai.vercel.app/`

@@ -5,6 +5,24 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const body = (await request.json()) as HandleUploadBody;
+  const apiBase =
+    process.env.BACKEND_INTERNAL_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+
+  if (!process.env.BLOB_READ_WRITE_TOKEN && apiBase) {
+    const proxy = await fetch(`${apiBase}/api/files/blob-upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await proxy.text();
+    return new NextResponse(text, {
+      status: proxy.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     return NextResponse.json(
       {
@@ -14,8 +32,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 503 }
     );
   }
-
-  const body = (await request.json()) as HandleUploadBody;
 
   try {
     const jsonResponse = await handleUpload({
@@ -34,10 +50,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         maximumSizeInBytes: 500 * 1024 * 1024,
         addRandomSuffix: true,
       }),
-      onUploadCompleted: async ({ blob }) => {
-        // Required for client upload() to finish; DB registration happens in from-blob.
-        console.log("Blob client upload completed:", blob.url);
-      },
     });
     return NextResponse.json(jsonResponse);
   } catch (error) {

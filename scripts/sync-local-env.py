@@ -173,6 +173,36 @@ def merge_secrets_file(secrets: dict[str, str]) -> None:
     SECRETS_FILE.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
+def _parse_env_file(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key in MERGE_KEYS and value and "xxxx" not in value:
+            out[key] = value
+    return out
+
+
+def migrate_secrets_from_env_file() -> bool:
+    """Move secret keys from backend/.env into .env.secrets before stripping .env."""
+    from_env = _parse_env_file(ENV_FILE)
+    if not from_env:
+        return False
+    existing = _parse_env_file(SECRETS_FILE)
+    merged = {**existing, **from_env}
+    if not merged.get("REPLICATE_API_TOKEN"):
+        return False
+    merge_secrets_file(merged)
+    print(f"Migrated {', '.join(from_env)} from {ENV_FILE.name} → {SECRETS_FILE.name}")
+    return True
+
+
 def ensure_local_env_defaults() -> None:
     lines: list[str] = []
     seen: set[str] = set()
@@ -202,6 +232,9 @@ def main() -> int:
             print(exc, file=sys.stderr)
 
     if not secrets.get("REPLICATE_API_TOKEN"):
+        if migrate_secrets_from_env_file():
+            ensure_local_env_defaults()
+            return 0
         print(
             "WARN: REPLICATE_API_TOKEN not available from Vercel CLI.\n"
             "Add to backend/.env.secrets manually (same value as Vercel dashboard → Environment Variables).",

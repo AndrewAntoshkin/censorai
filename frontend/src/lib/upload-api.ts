@@ -27,14 +27,35 @@ function isLocalDev(): boolean {
 }
 
 function shouldUseBlobUpload(): boolean {
-  // Prod (Vercel): browser → Blob → /from-blob. Chunk upload breaks on serverless.
   return !isLocalDev();
 }
 
-function shouldUseChunkUpload(file: File): boolean {
-  // Локально — один POST на /upload (chunk API часто отсутствует на старом uvicorn).
+function shouldUseChunkUpload(_file: File): boolean {
   if (isLocalDev()) return false;
   return true;
+}
+
+function isBlobQuotaError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("quota") ||
+    lower.includes("storage quota") ||
+    lower.includes("suspended") ||
+    lower.includes("store has been suspended")
+  );
+}
+
+async function blobStorageWritable(): Promise<boolean> {
+  try {
+    const res = await apiFetch(`${getApiBase()}/api/files/blob-selftest`, {
+      method: "POST",
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ok?: boolean };
+    return Boolean(data.ok);
+  } catch {
+    return false;
+  }
 }
 
 function uploadQuery(projectId?: string | null, extra?: Record<string, string>): string {
@@ -137,7 +158,12 @@ async function uploadViaBlob(
   const pathname = blobPathname(file);
   const useMultipart = useBlobMultipart(file);
 
-  onProgress(5, useMultipart ? "Подготовка частей…" : "Подключение к хранилищу…");
+  onProgress(
+    5,
+    useMultipart
+      ? "Подготовка частей… (на 300+ МБ первые % могут идти долго)"
+      : "Подключение к хранилищу…"
+  );
 
   const startedAt = Date.now();
   let lastPercent = 0;
@@ -182,12 +208,19 @@ async function uploadViaBlob(
       throw new Error("Загрузка заняла слишком много времени. Попробуйте снова.");
     }
     const message = err instanceof Error ? err.message : "Upload failed";
-    if (/blob|token|storage/i.test(message)) {
+    const lower = message.toLowerCase();
+    if (isBlobQuotaError(message)) {
+      throw new Error("BLOB_QUOTA_EXCEEDED");
+    }
+    if (lower.includes("client token has expired")) {
+      throw new Error("Сессия загрузки истекла. Закройте окно и загрузите файл снова.");
+    }
+    if (lower.includes("failed to  retrieve the client token")) {
       throw new Error(
-        "Не удалось подключиться к Vercel Blob. Нужен BLOB_READ_WRITE_TOKEN в настройках Vercel."
+        "Сервер не выдал токен для загрузки. Проверьте BLOB_READ_WRITE_TOKEN на backend в Vercel."
       );
     }
-    throw err instanceof Error ? err : new Error(message);
+    throw new Error(message);
   } finally {
     clearInterval(heartbeat);
     clearTimeout(timeout);
@@ -200,6 +233,8 @@ async function registerBlobAndAnalyze(
   blobUrl: string,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
+  onProgress(88, "Проверка длительности…");
+  const durationSeconds = await readVideoDurationSeconds(file);
   onProgress(90, "Регистрация и запуск анализа…");
   const res = await apiFetch(
     `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId)}`,
@@ -210,6 +245,9 @@ async function registerBlobAndAnalyze(
         blob_url: blobUrl,
         filename: file.name,
         size: file.size,
+        ...(durationSeconds !== undefined
+          ? { duration_seconds: durationSeconds }
+          : {}),
       }),
     }
   );
@@ -297,20 +335,36 @@ export async function uploadFileToProject(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload()) {
-    const uploadUrl =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/upload/blob`
-        : "/upload/blob";
-
-    let blob: { url: string };
-    try {
-      blob = await uploadViaBlob(file, uploadUrl, onProgress);
-    } catch {
-      onProgress(3, "Повторная попытка загрузки…");
-      blob = await uploadViaBlob(file, uploadUrl, onProgress);
+    const blobWritable = await blobStorageWritable();
+    if (!blobWritable) {
+      onProgress(2, "Blob переполнен — загрузка через сервер…");
+      return uploadViaChunks(file, projectId, onProgress);
     }
 
-    return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+    const uploadUrl = `${getApiBase()}/api/files/blob-upload`;
+
+    try {
+      const blob = await uploadViaBlob(file, uploadUrl, onProgress);
+      return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(message)) {
+        onProgress(2, "Blob переполнен — загрузка через сервер…");
+        return uploadViaChunks(file, projectId, onProgress);
+      }
+      onProgress(3, "Повторная попытка загрузки…");
+      try {
+        const blob = await uploadViaBlob(file, uploadUrl, onProgress);
+        return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        if (retryMsg === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(retryMsg)) {
+          onProgress(2, "Blob переполнен — загрузка через сервер…");
+          return uploadViaChunks(file, projectId, onProgress);
+        }
+        throw retryErr;
+      }
+    }
   }
 
   if (shouldUseChunkUpload(file)) {
