@@ -12,8 +12,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.deps import CurrentAuth, require_auth_if_enabled
+from app.core.filename import normalize_filename
 from app.models.analysis import Analysis, Scene
 from app.models.project import Project, VideoFile
+from app.services.access import apply_files_scope, require_project_access
 from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
 from app.schemas.project import (
     AssignProjectRequest,
@@ -47,6 +50,37 @@ from app.services.video_media import ensure_public_video_url
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=settings.route_prefix("/files"), tags=["files"])
+
+
+async def _load_project(db: AsyncSession, project_id: str) -> Project:
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+async def _ensure_project_access(
+    db: AsyncSession,
+    auth: CurrentAuth | None,
+    project_id: str,
+) -> Project:
+    project = await _load_project(db, project_id)
+    user = auth.user if auth else None
+    session = auth.session if auth else None
+    require_project_access(user, project, session)
+    return project
+
+
+async def _ensure_video_access(
+    db: AsyncSession, auth: CurrentAuth | None, file_id: str
+) -> VideoFile:
+    result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="File not found")
+    await _ensure_project_access(db, auth, video.project_id)
+    return video
 
 
 def _expected_duration(video: VideoFile) -> int | None:
@@ -216,6 +250,7 @@ async def upload_file(
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -224,6 +259,8 @@ async def upload_file(
         resolved_project_id = await resolve_project_id(db, project_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+
+    await _ensure_project_access(db, auth, resolved_project_id)
 
     content = await file.read()
     size_mb = len(content) / (1024 * 1024)
@@ -237,8 +274,9 @@ async def upload_file(
         resolved_project_id, file.filename, content
     )
 
+    safe_name = normalize_filename(file.filename)
     video = VideoFile(
-        name=file.filename,
+        name=safe_name,
         size=len(content),
         status="uploaded",
         progress=100,
@@ -259,12 +297,15 @@ async def upload_file(
 
 @router.post("/upload-chunks/init", response_model=ChunkUploadInitResponse, status_code=201)
 async def init_chunk_upload(
-    data: ChunkUploadInitRequest, db: AsyncSession = Depends(get_db)
+    data: ChunkUploadInitRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     try:
         resolved_project_id = await resolve_project_id(db, data.project_id)
+        await _ensure_project_access(db, auth, resolved_project_id)
         session = create_session(
-            filename=data.filename,
+            filename=normalize_filename(data.filename),
             size=data.size,
             project_id=resolved_project_id,
             folder_id=data.folder_id,
@@ -424,9 +465,11 @@ async def complete_chunk_upload(
     session_id: str,
     auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     try:
         merged_result, session = merge_session(session_id)
+        await _ensure_project_access(db, auth, session.project_id)
         if isinstance(merged_result, str) and merged_result.startswith(("http://", "https://")):
             storage_path = merged_result
         else:
@@ -468,11 +511,14 @@ async def register_from_blob(
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     try:
         resolved_project_id = await resolve_project_id(db, project_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+
+    await _ensure_project_access(db, auth, resolved_project_id)
 
     size_mb = data.size / (1024 * 1024)
     if size_mb > settings.UPLOAD_MAX_SIZE_MB:
@@ -482,7 +528,7 @@ async def register_from_blob(
         )
 
     video = VideoFile(
-        name=data.filename,
+        name=normalize_filename(data.filename),
         size=data.size,
         status="uploaded",
         progress=100,
@@ -506,14 +552,13 @@ async def assign_file_to_project(
     file_id: str,
     data: AssignProjectRequest,
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     if is_system_project(data.project_id):
         raise HTTPException(status_code=400, detail="Invalid target project")
 
-    result = await db.execute(select(Project).where(Project.id == data.project_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
-
+    await _ensure_project_access(db, auth, data.project_id)
+    await _ensure_video_access(db, auth, file_id)
     result = await db.execute(
         select(VideoFile)
         .options(selectinload(VideoFile.analysis))
@@ -539,14 +584,15 @@ async def assign_file_to_project(
 
 
 @router.delete("/{file_id}", status_code=204)
-async def delete_file(file_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="File not found")
+async def delete_file(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
+):
+    video = await _ensure_video_access(db, auth, file_id)
 
     if video.storage_path:
-        await release_video_blob(video)
+        await asyncio.to_thread(release_video_blob, video.storage_path)
 
     await db.delete(video)
     await db.flush()
@@ -557,6 +603,7 @@ async def recent_files(
     limit: int = 12,
     analyzed_only: bool = True,
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     # Demo seeding already runs once at DB init (get_db -> ensure_database);
     # no need to re-check it on every request.
@@ -568,12 +615,19 @@ async def recent_files(
     )
     if analyzed_only:
         stmt = stmt.where(VideoFile.analysis_id.is_not(None))
+    user = auth.user if auth else None
+    session = auth.session if auth else None
+    stmt = apply_files_scope(stmt, user, session)
     result = await db.execute(stmt)
     return result.scalars().all()
 
 
 @router.get("/{file_id}", response_model=VideoFileResponse)
-async def get_file(file_id: str, db: AsyncSession = Depends(get_db)):
+async def get_file(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
+):
     result = await db.execute(
         select(VideoFile)
         .options(selectinload(VideoFile.analysis))
@@ -582,6 +636,9 @@ async def get_file(file_id: str, db: AsyncSession = Depends(get_db)):
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="File not found")
+    user = auth.user if auth else None
+    session = auth.session if auth else None
+    require_project_access(user, await _load_project(db, video.project_id), session)
 
     try:
         await _maybe_finish_analysis(video, db)
@@ -601,13 +658,12 @@ async def get_file(file_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{file_id}/analysis", response_model=AnalysisResponse)
-async def get_analysis(file_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(VideoFile).where(VideoFile.id == file_id)
-    )
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="File not found")
+async def get_analysis(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
+):
+    video = await _ensure_video_access(db, auth, file_id)
 
     try:
         await _maybe_finish_analysis(video, db)
@@ -643,13 +699,9 @@ async def analyze_file(
     file_id: str,
     force: bool = Query(False, description="Re-run analysis even if already completed"),
     db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
-    result = await db.execute(
-        select(VideoFile).where(VideoFile.id == file_id)
-    )
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="File not found")
+    video = await _ensure_video_access(db, auth, file_id)
 
     if not video.storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path")
@@ -730,12 +782,13 @@ async def replicate_media(
 
 
 @router.get("/{file_id}/report")
-async def download_report(file_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(VideoFile).where(VideoFile.id == file_id)
-    )
-    video = result.scalar_one_or_none()
-    if not video or not video.analysis_id:
+async def download_report(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
+):
+    video = await _ensure_video_access(db, auth, file_id)
+    if not video.analysis_id:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     analysis_result = await db.execute(

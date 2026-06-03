@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import { cn, displayFileName } from "@/lib/utils";
 import {
   MAX_CONCURRENT_UPLOADS,
   addPendingUploadJobs,
@@ -34,14 +34,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
-}
-
-function displayFileName(name: string): string {
-  try {
-    return decodeURIComponent(name);
-  } catch {
-    return name;
-  }
 }
 
 const STATUS_LABELS: Record<string, string> = {

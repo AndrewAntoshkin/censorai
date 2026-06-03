@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.db_url import resolve_database_env
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if not os.getenv("VERCEL"):
+    load_dotenv(_BACKEND_ROOT / ".env")
 
 resolve_database_env()
 
@@ -77,6 +83,16 @@ class Settings(BaseSettings):
     VIDEO_PROVIDER: str = "replicate"  # "replicate" | "gemini"
 
     API_PREFIX: str = _default_api_prefix()
+
+    # When true, API requires a signed-in user; projects/files are scoped per owner.
+    AUTH_REQUIRED: bool = False
+    # Used to sign session identifiers (set a long random string in production).
+    AUTH_SECRET: str = "dev-change-me-in-production"
+
+    SUPER_ADMIN_EMAIL: str = "andrew.antoshkin@gmail.com"
+    FRAMECHECK_ORG_NAME: str = "Фреймчек"
+    # Invite code for the Framecheck org (created on DB init if missing).
+    FRAMECHECK_REGISTRATION_CODE: str = "FRAMECHECK2026"
 
     def route_prefix(self, path: str) -> str:
         segment = path if path.startswith("/") else f"/{path}"

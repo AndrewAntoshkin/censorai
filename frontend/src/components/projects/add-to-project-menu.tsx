@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderPlus, Loader2, MoreHorizontal } from "lucide-react";
+import { FolderPlus, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { api, type ProjectAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ interface AddToProjectMenuProps {
   fileId: string;
   currentProjectId?: string | null;
   onAssigned?: (projectId: string) => void;
+  onDelete?: () => Promise<void> | void;
   className?: string;
 }
 
@@ -27,11 +28,13 @@ export function AddToProjectMenu({
   fileId,
   currentProjectId,
   onAssigned,
+  onDelete,
   className,
 }: AddToProjectMenuProps) {
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
   const [loading, setLoading] = useState(false);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -63,6 +66,18 @@ export function AddToProjectMenu({
       // keep menu open on error
     } finally {
       setAssigningId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!onDelete) return;
+    if (!window.confirm("Удалить этот отчёт?")) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+      setOpen(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -117,6 +132,7 @@ export function AddToProjectMenu({
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            disabled={assigningId !== null || deleting}
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -126,6 +142,26 @@ export function AddToProjectMenu({
             <FolderPlus className="h-4 w-4" />
             Новый проект…
           </DropdownMenuItem>
+          {onDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={assigningId !== null || deleting}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleDelete();
+                }}
+                className="text-critical focus:text-critical"
+              >
+                {deleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Удалить отчёт
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

@@ -25,27 +25,57 @@ export function getApiBase(): string {
 }
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 async function request<T>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit & { timeoutMs?: number }
 ): Promise<T> {
   if (DEMO_MODE) {
     return demoRequest<T>(path, options);
   }
 
-  const res = await fetch(`${getApiBase()}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    ...options,
-  });
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const { timeoutMs: _t, signal: extSignal, ...fetchOptions } = options ?? {};
+  const controller = new AbortController();
+  const timer =
+    typeof window !== "undefined"
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : undefined;
+
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}${path}`, {
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...fetchOptions.headers,
+      },
+      signal: extSignal ?? controller.signal,
+      ...fetchOptions,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`API timeout after ${timeoutMs}ms: ${path}`);
+    }
+    throw err;
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`API error ${res.status}: ${body}`);
   }
-  return res.json();
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const body = await res.text();
+  if (!body) {
+    return undefined as T;
+  }
+
+  return JSON.parse(body) as T;
 }
 
 function demoRequest<T>(path: string, options?: RequestInit): T {
@@ -230,7 +260,72 @@ export interface AnalysisAPI {
   scenes: SceneAPI[];
 }
 
+export interface OrganizationAPI {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface UserAPI {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  organization: OrganizationAPI | null;
+  active_organization: OrganizationAPI | null;
+  created_at: string;
+}
+
+export interface AuthConfigAPI {
+  auth_required: boolean;
+  authenticated: boolean;
+}
+
 export const api = {
+  auth: {
+    config: () => request<AuthConfigAPI>("/api/auth/config"),
+    me: () => request<UserAPI | null>("/api/auth/me"),
+    register: (body: {
+      email: string;
+      password: string;
+      display_name: string;
+      registration_code: string;
+    }) =>
+      request<UserAPI>("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    validateCode: (registration_code: string) =>
+      request<{ valid: boolean; organization: OrganizationAPI }>(
+        "/api/auth/validate-code",
+        {
+          method: "POST",
+          body: JSON.stringify({ registration_code }),
+        }
+      ),
+    listOrganizations: () =>
+      request<OrganizationAPI[]>("/api/auth/organizations"),
+    switchOrganization: (organization_id: string) =>
+      request<UserAPI>("/api/auth/active-organization", {
+        method: "POST",
+        body: JSON.stringify({ organization_id }),
+      }),
+    login: (body: { email: string; password: string }) =>
+      request<UserAPI>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    logout: () =>
+      request<void>("/api/auth/logout", {
+        method: "POST",
+      }),
+    updateProfile: (body: { display_name?: string; email?: string }) =>
+      request<UserAPI>("/api/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+  },
+
   projects: {
     list: () => request<ProjectAPI[]>("/api/projects"),
     get: (id: string) => request<ProjectAPI>(`/api/projects/${id}`),
@@ -316,6 +411,7 @@ export const api = {
 
         xhr.addEventListener("error", () => reject(new Error("Upload failed")));
 
+        xhr.withCredentials = true;
         xhr.open("POST", `${getApiBase()}/api/files/upload?${params.toString()}`);
         xhr.send(formData);
       });

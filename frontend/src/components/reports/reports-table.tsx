@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Film, Search, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, displayFileName } from "@/lib/utils";
 import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,7 @@ export function ReportsTable({
         ? files.filter((f) => WORKING_STATUSES.has((f.status || "").toLowerCase()))
         : files;
     if (!q) return base;
-    return base.filter((f) => f.name.toLowerCase().includes(q));
+    return base.filter((f) => displayFileName(f.name).toLowerCase().includes(q));
   }, [files, query, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -148,6 +148,17 @@ export function ReportsTable({
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const handleSingleDelete = async (fileId: string) => {
+    await api.files.delete(fileId);
+    const next = files.filter((file) => file.id !== fileId);
+    onFilesChanged?.(next);
+    setSelectedIds((prev) => {
+      const nextSelected = new Set(prev);
+      nextSelected.delete(fileId);
+      return nextSelected;
+    });
   };
 
   const rangeStart = filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -257,7 +268,7 @@ export function ReportsTable({
                           type="checkbox"
                           checked={selectedIds.has(file.id)}
                           onChange={(e) => toggleRow(file.id, e.target.checked)}
-                          aria-label={`Выбрать ${file.name}`}
+                          aria-label={`Выбрать ${displayFileName(file.name)}`}
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -267,16 +278,16 @@ export function ReportsTable({
                             title="В работе"
                           >
                             <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span className="block min-w-0 truncate">{file.name}</span>
+                            <span className="block min-w-0 truncate">{displayFileName(file.name)}</span>
                           </div>
                         ) : (
                           <Link
                             href={`/file/${file.id}`}
                             className="flex min-w-0 max-w-full items-center gap-2.5 font-medium text-foreground hover:text-primary"
-                            title={file.name}
+                            title={displayFileName(file.name)}
                           >
                             <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span className="block min-w-0 truncate">{file.name}</span>
+                            <span className="block min-w-0 truncate">{displayFileName(file.name)}</span>
                           </Link>
                         )}
                       </td>
@@ -295,6 +306,7 @@ export function ReportsTable({
                           fileId={file.id}
                           currentProjectId={file.project_id}
                           onAssigned={(projectId) => onProjectAssigned?.(file.id, projectId)}
+                          onDelete={() => handleSingleDelete(file.id)}
                         />
                       </td>
                     </tr>

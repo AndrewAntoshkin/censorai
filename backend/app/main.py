@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth import router as auth_router
 from app.api.books import router as books_router
 from app.api.files import router as files_router
 from app.api.projects import router as projects_router
@@ -37,6 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(files_router)
 app.include_router(books_router)
@@ -60,6 +62,7 @@ async def health_check():
             "has_storage_url": bool(os.getenv("STORAGE_URL", "").strip()),
             "replicate_max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
             "analysis_max_coverage_retries": settings.ANALYSIS_MAX_COVERAGE_RETRIES,
+            "auth_required": settings.AUTH_REQUIRED,
         },
         "db": database_status(),
     }

@@ -72,6 +72,39 @@ def _migrate_columns() -> None:
                     )
                 )
                 logger.info("Added video_files.analysis_attempts column")
+
+            project_cols = {
+                row[1] for row in conn.execute(sa.text("PRAGMA table_info(projects)"))
+            }
+            if "owner_id" not in project_cols:
+                conn.execute(
+                    sa.text("ALTER TABLE projects ADD COLUMN owner_id VARCHAR(36)")
+                )
+                logger.info("Added projects.owner_id column")
+            if "organization_id" not in project_cols:
+                conn.execute(sa.text("ALTER TABLE projects ADD COLUMN organization_id VARCHAR(36)"))
+                logger.info("Added projects.organization_id column")
+
+            user_cols = {row[1] for row in conn.execute(sa.text("PRAGMA table_info(users)"))}
+            if user_cols:
+                if "organization_id" not in user_cols:
+                    conn.execute(sa.text("ALTER TABLE users ADD COLUMN organization_id VARCHAR(36)"))
+                if "role" not in user_cols:
+                    conn.execute(
+                        sa.text(
+                            "ALTER TABLE users ADD COLUMN role VARCHAR(32) "
+                            "NOT NULL DEFAULT 'member'"
+                        )
+                    )
+            session_cols = {
+                row[1] for row in conn.execute(sa.text("PRAGMA table_info(auth_sessions)"))
+            }
+            if session_cols and "active_organization_id" not in session_cols:
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE auth_sessions ADD COLUMN active_organization_id VARCHAR(36)"
+                    )
+                )
         else:
             conn.execute(
                 sa.text(
@@ -100,10 +133,95 @@ def _migrate_columns() -> None:
                     "duration_seconds DOUBLE PRECISION"
                 )
             )
-            logger.info(
-                "Ensured video_files.replicate_prediction_id, duration_seconds, "
-                "analysis_attempts and scenes.mode columns"
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36) "
+                    "REFERENCES users(id) ON DELETE SET NULL"
+                )
             )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS "
+                    "organization_id VARCHAR(36) REFERENCES organizations(id) ON DELETE CASCADE"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                    "organization_id VARCHAR(36) REFERENCES organizations(id) ON DELETE RESTRICT"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) "
+                    "NOT NULL DEFAULT 'member'"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "active_organization_id VARCHAR(36) "
+                    "REFERENCES organizations(id) ON DELETE SET NULL"
+                )
+            )
+            logger.info(
+                "Ensured video_files, scenes, projects, users, auth_sessions columns"
+            )
+
+
+def _ensure_organizations_sync(sync_engine) -> None:
+    from sqlalchemy import select, update
+    from sqlalchemy.orm import Session
+
+    from app.models.organization import Organization, RegistrationCode
+    from app.models.project import Project
+    from app.services.organization_service import (
+        FRAMECHECK_SLUG,
+        normalize_registration_code,
+    )
+    from app.services.project_buckets import UNASSIGNED_PROJECT_ID
+
+    with Session(sync_engine) as session:
+        org = session.scalar(
+            select(Organization).where(Organization.slug == FRAMECHECK_SLUG)
+        )
+        if org is None:
+            org = Organization(name=settings.FRAMECHECK_ORG_NAME, slug=FRAMECHECK_SLUG)
+            session.add(org)
+            session.flush()
+
+        code_value = normalize_registration_code(settings.FRAMECHECK_REGISTRATION_CODE)
+        existing_code = session.scalar(
+            select(RegistrationCode).where(RegistrationCode.code == code_value)
+        )
+        if existing_code is None:
+            session.add(
+                RegistrationCode(
+                    code=code_value,
+                    organization_id=org.id,
+                    label="Framecheck default",
+                )
+            )
+        elif existing_code.organization_id != org.id:
+            logger.warning(
+                "Registration code %s belongs to another org; skipping reassign",
+                code_value,
+            )
+
+        session.execute(
+            update(Project)
+            .where(
+                Project.id != UNASSIGNED_PROJECT_ID,
+                Project.organization_id.is_(None),
+            )
+            .values(organization_id=org.id)
+        )
+        session.commit()
+        logger.info(
+            "Organizations ready (slug=%s, invite code=%s)",
+            FRAMECHECK_SLUG,
+            code_value,
+        )
 
 
 def _init_sync() -> None:
@@ -128,14 +246,20 @@ def _init_sync() -> None:
                 connect_args=sync_connect_args,
             )
             Base.metadata.create_all(sync_engine)
-            _ensure_unassigned_sync(sync_engine)
-            sync_engine.dispose()
-
             _migrate_columns()
+            _ensure_unassigned_sync(sync_engine)
+            _ensure_organizations_sync(sync_engine)
+
+            sync_engine.dispose()
 
             from app.services.seed_bundle import ensure_demo_seeded
 
-            ensure_demo_seeded()
+            try:
+                ensure_demo_seeded()
+            except Exception:
+                # Demo content is optional for API availability; do not block all
+                # endpoints if bundle import hits a duplicate/legacy row conflict.
+                logger.exception("Demo seed failed; continuing without reseed")
             _initialized = True
             db_kind = "postgres" if "postgres" in settings.DATABASE_URL else "sqlite"
             logger.info("Database initialized (%s)", db_kind)

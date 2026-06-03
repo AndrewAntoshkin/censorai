@@ -1,5 +1,9 @@
 import { getApiBase, type VideoFileAPI } from "@/lib/api";
 
+function apiFetch(input: string, init?: RequestInit) {
+  return fetch(input, { ...init, credentials: "include" });
+}
+
 const CHUNK_SIZE = 3 * 1024 * 1024;
 const BLOB_MULTIPART_THRESHOLD = 4 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
@@ -46,7 +50,7 @@ async function uploadViaDirectPost(
   onProgress(5, "Загрузка на сервер…");
   const formData = new FormData();
   formData.append("file", file);
-  const uploadRes = await fetch(
+  const uploadRes = await apiFetch(
     `${getApiBase()}/api/files/upload?${uploadQuery(projectId)}`,
     { method: "POST", body: formData }
   );
@@ -81,7 +85,7 @@ export async function waitForAnalysis(
   options?: { alreadyStarted?: boolean }
 ): Promise<void> {
   if (!options?.alreadyStarted) {
-    const analyzeRes = await fetch(`${getApiBase()}/api/files/${fileId}/analyze`, {
+    const analyzeRes = await apiFetch(`${getApiBase()}/api/files/${fileId}/analyze`, {
       method: "POST",
     });
 
@@ -94,7 +98,7 @@ export async function waitForAnalysis(
   const deadline = Date.now() + 60 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
-    const statusRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+    const statusRes = await apiFetch(`${getApiBase()}/api/files/${fileId}`);
     if (statusRes.status >= 500) {
       throw new Error("Ошибка сервера при проверке статуса анализа");
     }
@@ -106,7 +110,7 @@ export async function waitForAnalysis(
     }
     onProgress(Math.min(98, fileState.progress ?? 70));
   }
-  const finalRes = await fetch(`${getApiBase()}/api/files/${fileId}`);
+  const finalRes = await apiFetch(`${getApiBase()}/api/files/${fileId}`);
   const finalFile = await finalRes.json();
   if (finalFile.status !== "analyzed") {
     throw new Error("Analysis timed out");
@@ -196,7 +200,7 @@ async function registerBlobAndAnalyze(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   onProgress(90, "Регистрация и запуск анализа…");
-  const res = await fetch(
+  const res = await apiFetch(
     `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId)}`,
     {
       method: "POST",
@@ -227,7 +231,7 @@ async function uploadViaChunks(
 
   const durationSeconds = await readVideoDurationSeconds(file);
 
-  const initRes = await fetch(`${getApiBase()}/api/files/upload-chunks/init`, {
+  const initRes = await apiFetch(`${getApiBase()}/api/files/upload-chunks/init`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -253,7 +257,7 @@ async function uploadViaChunks(
     const end = Math.min(start + CHUNK_SIZE, file.size);
     const chunk = file.slice(start, end);
 
-    const chunkRes = await fetch(
+    const chunkRes = await apiFetch(
       `${getApiBase()}/api/files/upload-chunks/${sessionId}/parts/${part}`,
       {
         method: "PUT",
@@ -273,7 +277,7 @@ async function uploadViaChunks(
   }
 
   onProgress(90, "Сборка файла и запуск анализа…");
-  const completeRes = await fetch(
+  const completeRes = await apiFetch(
     `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
     { method: "POST" }
   );

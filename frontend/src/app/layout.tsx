@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
-import { Onest, JetBrains_Mono } from "next/font/google";
+import { Onest } from "next/font/google";
 import "./globals.css";
 import { UploadUnloadGuard } from "@/components/upload/upload-unload-guard";
+import { AuthProvider } from "@/contexts/auth-context";
+import { ThemeProvider } from "@/contexts/theme-context";
 
 const onest = Onest({
   variable: "--font-sans",
-  subsets: ["latin", "cyrillic"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
   subsets: ["latin", "cyrillic"],
 });
 
@@ -24,10 +21,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" className={`${onest.variable} ${jetbrainsMono.variable} h-full antialiased`}>
+    <html lang="ru" className={`${onest.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("fc-theme");if(t==="dark")document.documentElement.classList.add("dark");}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="min-h-full font-sans">
-        <UploadUnloadGuard />
-        {children}
+        <ThemeProvider>
+          <AuthProvider>
+            <UploadUnloadGuard />
+            {children}
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

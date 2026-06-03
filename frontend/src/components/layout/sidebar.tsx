@@ -21,6 +21,8 @@ import {
 import { cn } from "@/lib/utils";
 import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
 import { getUploadJobsSnapshot, subscribeUploadJobs } from "@/lib/upload-jobs";
+import { useAuth } from "@/contexts/auth-context";
+import { OrgSwitcher } from "@/components/layout/org-switcher";
 
 const navItems = [
   { icon: Home, label: "Главная", href: "/" },
@@ -64,8 +66,18 @@ function Widget({
   );
 }
 
+function profileInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export function Sidebar() {
   const pathname = usePathname();
+  const { user, loading: authLoading } = useAuth();
   const [projects, setProjects] = useState<ProjectAPI[]>([]);
   const [recentFiles, setRecentFiles] = useState<VideoFileAPI[]>([]);
   const [backendInProgressCount, setBackendInProgressCount] = useState(0);
@@ -80,31 +92,42 @@ export function Sidebar() {
   );
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setProjects([]);
+      setRecentFiles([]);
+      setBackendInProgressCount(0);
+      return;
+    }
+
     let active = true;
     const load = async () => {
-      const [p, r, allReports] = await Promise.all([
-        api.projects.list(),
-        api.files.recent(6, { analyzedOnly: false }),
-        api.files.recent(100, { analyzedOnly: false }),
-      ]);
-      if (!active) return;
-      const inProgress = allReports.filter((f) =>
-        ["uploading", "uploaded", "analyzing"].includes((f.status || "").toLowerCase())
-      ).length;
-      setBackendInProgressCount(inProgress);
-      setProjects(p);
-      setRecentFiles(r);
+      try {
+        const [p, r, inProgressList] = await Promise.all([
+          api.projects.list(),
+          api.files.recent(6, { analyzedOnly: false }),
+          api.files.recent(24, { analyzedOnly: false }),
+        ]);
+        if (!active) return;
+        const inProgress = inProgressList.filter((f) =>
+          ["uploading", "uploaded", "analyzing"].includes((f.status || "").toLowerCase())
+        ).length;
+        setBackendInProgressCount(inProgress);
+        setProjects(p);
+        setRecentFiles(r);
+      } catch {
+        if (!active) return;
+      }
     };
-    void load()
-      .catch(() => {});
+    void load();
     const poll = window.setInterval(() => {
-      void load().catch(() => {});
-    }, 5000);
+      void load();
+    }, 10_000);
     return () => {
       active = false;
       window.clearInterval(poll);
     };
-  }, []);
+  }, [authLoading, user]);
 
   useEffect(() => {
     const done = jobs.filter((j) => j.status === "done" && j.fileId);
@@ -153,6 +176,8 @@ export function Sidebar() {
           <Settings className="h-4 w-4" />
         </Link>
       </div>
+
+      <OrgSwitcher />
 
       {/* Search field */}
       <Link
@@ -247,17 +272,24 @@ export function Sidebar() {
 
       {/* Footer: profile + help */}
       <div className="mt-1 flex items-center gap-1 border-t border-sidebar-border pt-2">
-        <button className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-sidebar-accent">
+        <Link
+          href={user ? "/profile" : "/login"}
+          className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-sidebar-accent"
+        >
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/12 text-xs font-semibold text-primary">
-            А
+            {user ? profileInitials(user.display_name) : "?"}
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium text-foreground">
-              Аркадий Н.
+              {authLoading
+                ? "…"
+                : user
+                  ? user.display_name
+                  : "Войти"}
             </span>
           </span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
+        </Link>
         <Link
           href="/help"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"

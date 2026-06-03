@@ -89,7 +89,7 @@ function Hero() {
     <section className="pt-36 pb-20 px-6">
       <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-x-12 gap-y-14 items-center">
         <div>
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#f0f3ff] text-[11px] font-mono uppercase tracking-[0.12em] text-[#0048ff] mb-7">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#f0f3ff] text-[11px] uppercase tracking-[0.12em] text-[#0048ff] mb-7">
             <Zap className="w-3.5 h-3.5" />
             Час видео за ~5 минут
           </div>
@@ -159,7 +159,7 @@ function HeroPreview() {
         <div className="mt-4 space-y-3">
           {rows.map((r) => (
             <div key={r.time} className="flex items-center gap-3 text-xs">
-              <span className="font-mono text-neutral-400 shrink-0 w-10">
+              <span className="text-neutral-400 shrink-0 w-10">
                 {r.time}
               </span>
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.dot}`} />
@@ -192,7 +192,7 @@ function Stats() {
 
   return (
     <section className="pb-24 px-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           {stats.map((stat) => (
             <div
@@ -251,9 +251,9 @@ function TargetAudience() {
 
   return (
     <section id="audience" className="py-24 px-6 bg-neutral-50">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+      <div className="max-w-6xl mx-auto grid lg:grid-cols-[18rem_1fr] gap-x-14 gap-y-10">
+        <div className="lg:sticky lg:top-28 self-start">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Для кого
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -264,7 +264,7 @@ function TargetAudience() {
             ответственность за его соответствие законодательству
           </p>
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid sm:grid-cols-2 gap-5">
           {audiences.map((item) => (
             <div
               key={item.title}
@@ -313,9 +313,9 @@ function HowItWorks() {
 
   return (
     <section id="how" className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Процесс
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -378,9 +378,9 @@ function UseCases() {
 
   return (
     <section className="py-24 px-6 bg-neutral-50">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+      <div className="max-w-6xl mx-auto grid lg:grid-cols-[18rem_1fr] gap-x-14 gap-y-10">
+        <div className="lg:sticky lg:top-28 self-start">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Сценарии
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -391,7 +391,7 @@ function UseCases() {
             как&nbsp;этап автоматической предварительной проверки
           </p>
         </div>
-        <div className="grid sm:grid-cols-2 gap-6">
+        <div className="grid sm:grid-cols-2 gap-5">
           {cases.map((item) => (
             <div
               key={item.title}
@@ -439,9 +439,9 @@ function RiskCategories() {
 
   return (
     <section className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Категории
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -515,9 +515,9 @@ function LegalBasis() {
 
   return (
     <section className="py-24 px-6 bg-neutral-50">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Законодательство
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -606,9 +606,9 @@ function Comparison() {
 
   return (
     <section id="comparison" className="py-24 px-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Сравнение
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -669,8 +669,8 @@ function Comparison() {
 function ScaleSection() {
   return (
     <section className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
-        <div className="bg-gradient-to-br from-neutral-900 to-neutral-800 rounded-[2rem] p-10 sm:p-14">
+      <div className="max-w-6xl mx-auto">
+        <div className="bg-neutral-950 rounded-[2rem] p-10 sm:p-14">
           <div className="grid md:grid-cols-2 gap-10 items-center">
             <div>
               <h2 className="text-3xl sm:text-4xl font-normal text-white tracking-tight">
@@ -714,9 +714,9 @@ function ScaleSection() {
 function Pricing() {
   return (
     <section id="pricing" className="py-24 px-6 bg-neutral-50">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Тарифы
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -792,7 +792,7 @@ function PricingCard({
 }) {
   return (
     <div
-      className={`rounded-2xl p-8 flex flex-col ${highlighted ? "bg-neutral-900 text-white ring-2 ring-neutral-900" : "bg-white border border-neutral-200/70"}`}
+      className={`rounded-2xl p-8 flex flex-col ${highlighted ? "bg-neutral-950 text-white ring-1 ring-[#0048ff]/40" : "bg-white border border-neutral-200/70"}`}
     >
       <div className="mb-6">
         <h3
@@ -841,7 +841,7 @@ function PricingCard({
       </div>
       <a
         href="#cta"
-        className={`mt-8 block text-center py-3 rounded-full text-sm font-medium transition-colors ${highlighted ? "bg-white text-neutral-900 hover:bg-neutral-100" : "bg-neutral-900 text-white hover:bg-neutral-800"}`}
+        className={`mt-8 block text-center py-3 rounded-full text-sm font-medium transition-colors ${highlighted ? "bg-white text-neutral-900 hover:bg-neutral-100" : "bg-neutral-950 text-white hover:bg-neutral-800"}`}
       >
         Оставить заявку
       </a>
@@ -882,9 +882,9 @@ function Calculator() {
 
   return (
     <section className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Экономия
           </p>
           <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -1002,7 +1002,7 @@ function Calculator() {
 function Report() {
   return (
     <section className="py-24 px-6 bg-neutral-50">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="grid md:grid-cols-2 gap-12 items-center">
           <div>
             <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
@@ -1166,12 +1166,12 @@ function Security() {
 
   return (
     <section id="security" className="py-24 px-6">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-12 max-w-2xl">
-          <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#0048ff] mb-4">
+      <div className="max-w-6xl mx-auto grid lg:grid-cols-[minmax(0,18rem)_1fr] gap-x-14 gap-y-10">
+        <div className="lg:sticky lg:top-28 self-start min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#0048ff] mb-4">
             Безопасность
           </p>
-          <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-normal text-neutral-900 tracking-tight break-words hyphens-auto">
             Безопасность и&nbsp;конфиденциальность
           </h2>
           <p className="mt-4 text-neutral-500">
@@ -1179,13 +1179,13 @@ function Security() {
             контентом. Безопасность данных — наш приоритет.
           </p>
         </div>
-        <div className="grid sm:grid-cols-2 gap-6">
+        <div className="grid sm:grid-cols-2 gap-5">
           {items.map((item) => (
             <div
               key={item.title}
               className="bg-white rounded-2xl p-8 border border-neutral-200/70"
             >
-              <div className="w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center mb-5">
+              <div className="w-10 h-10 rounded-xl bg-[#f0f3ff] text-[#0048ff] flex items-center justify-center mb-5">
                 <item.icon className="w-5 h-5" />
               </div>
               <h3 className="text-lg font-medium text-neutral-900 mb-2">
@@ -1206,7 +1206,7 @@ function CTA() {
   return (
     <section id="cta" className="py-24 px-6">
       <div className="max-w-3xl mx-auto text-center">
-        <div className="bg-neutral-900 rounded-[2rem] p-12 sm:p-16">
+        <div className="bg-neutral-950 rounded-[2rem] p-12 sm:p-16">
           <h2 className="text-3xl sm:text-4xl font-normal text-white tracking-tight">
             Оставить заявку
           </h2>
@@ -1224,7 +1224,7 @@ function CTA() {
 function Footer() {
   return (
     <footer className="border-t border-neutral-100 py-12 px-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8 mb-8">
           <div className="flex items-center gap-3">
             <Logo />
