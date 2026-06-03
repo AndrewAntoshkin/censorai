@@ -108,6 +108,9 @@ async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
     video.replicate_prediction_id = prediction_id
     video.progress = min((video.progress or 0) + 5, 85)
     await db.flush()
+    from app.services.analysis_jobs import ensure_processing_job
+
+    await ensure_processing_job(db, video.id)
 
 
 async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
@@ -146,6 +149,10 @@ async def _kickoff_analysis(video: VideoFile, db: AsyncSession) -> None:
     video.replicate_prediction_id = prediction_id
     video.progress = 30
     await db.flush()
+
+    from app.services.analysis_jobs import ensure_processing_job
+
+    await ensure_processing_job(db, video.id)
 
 
 def _utc_naive_now() -> datetime:
@@ -234,6 +241,10 @@ async def _save_analysis_result(
     video.progress = 100
     video.analysis_id = analysis.id
     await db.flush()
+
+    from app.services.analysis_jobs import mark_job_completed
+
+    await mark_job_completed(db, video.id)
 
     blob_path = video.storage_path
     if await asyncio.to_thread(release_video_blob, blob_path):

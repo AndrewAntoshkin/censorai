@@ -15,6 +15,21 @@ services:
     ports:
       - "6379:6379"
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: arq app.worker.WorkerSettings
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/censorai
+      DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@postgres:5432/censorai
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend/uploads:/app/uploads
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"

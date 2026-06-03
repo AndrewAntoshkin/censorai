@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # Invite code for the Framecheck org (created on DB init if missing).
     FRAMECHECK_REGISTRATION_CODE: str = "FRAMECHECK2026"
 
+    # Background worker (arq) polls all analyzing videos — not only on frontend GET.
+    ANALYSIS_WORKER_POLL_SECONDS: int = 30
+
     def route_prefix(self, path: str) -> str:
         segment = path if path.startswith("/") else f"/{path}"
         if not self.API_PREFIX:

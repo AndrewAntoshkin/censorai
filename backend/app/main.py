@@ -44,6 +44,14 @@ app.include_router(files_router)
 app.include_router(books_router)
 
 
+@app.get(settings.route_prefix("/worker/poll-once"))
+async def worker_poll_once():
+    """Manual trigger for analysis poll (dev); production uses arq worker."""
+    from app.services.analysis_orchestration import run_analysis_poll_cycle
+
+    return await run_analysis_poll_cycle()
+
+
 @app.get(settings.route_prefix("/health"))
 async def health_check():
     import os

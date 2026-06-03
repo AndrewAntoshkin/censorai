@@ -16,9 +16,18 @@ fi
 
 cleanup() {
   trap - EXIT INT TERM
-  kill "$BACK_PID" "$FRONT_PID" 2>/dev/null || true
+  kill "$BACK_PID" "$FRONT_PID" ${WORKER_PID:-} 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+if redis-cli ping >/dev/null 2>&1; then
+  echo "→ Analysis worker (arq)"
+  (cd backend && .venv/bin/arq app.worker.WorkerSettings) &
+  WORKER_PID=$!
+else
+  echo "⚠️  Redis offline — worker skipped (analysis only advances on page open)"
+  WORKER_PID=""
+fi
 
 echo "→ Backend http://127.0.0.1:8000"
 (cd backend && .venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000) &

@@ -2,7 +2,7 @@
 
 Поэтапная дорожная карта. Каждый этап должен оставлять продукт рабочим.
 
-## Этап 1 — База, профили, организации ✅ (текущий)
+## Этап 1 — База, профили, организации ✅
 
 - **Postgres** как основная БД (`docker compose up -d postgres`)
 - **Пользователи**: регистрация с **кодом организации**, вход, cookie-сессия, профиль
@@ -19,11 +19,18 @@ cd backend && cp .env.example .env   # AUTH_REQUIRED=true
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Этап 2 — Фоновая оркестрация анализа
+## Этап 2 — Фоновая оркестрация анализа 🚧 (в работе)
 
-- arq + Redis: воркер опрашивает все `analyzing`, без piggyback на GET
-- Статусы джоб в БД: `queued` → `processing` → `done` / `failed`
-- Retry и visibility timeout
+- ✅ arq + Redis: воркер опрашивает все `analyzing`, без piggyback на GET
+- ✅ `./scripts/run_worker.sh` или `docker compose up worker`
+- ✅ Dev: `GET /api/worker/poll-once` — ручной тик
+- ⏳ Таблица `analysis_jobs`: `queued` → `processing` → `done` / `failed`
+- ⏳ Retry / DLQ / visibility timeout
+
+```bash
+docker compose up -d redis
+./scripts/run_worker.sh
+```
 
 ## Этап 3 — Хранилище и провайдер
 

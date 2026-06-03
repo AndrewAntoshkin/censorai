@@ -157,3 +157,6 @@ async def _handle_poll_error(
     locked.status = "error"
     locked.replicate_prediction_id = None
     await db.flush()
+    from app.services.analysis_jobs import mark_job_failed
+
+    await mark_job_failed(db, file_id, str(exc))
