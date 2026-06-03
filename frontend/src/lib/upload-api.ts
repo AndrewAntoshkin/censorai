@@ -27,7 +27,8 @@ function isLocalDev(): boolean {
 }
 
 function shouldUseBlobUpload(): boolean {
-  return false;
+  // Prod (Vercel): browser → Blob → /from-blob. Chunk upload breaks on serverless.
+  return !isLocalDev();
 }
 
 function shouldUseChunkUpload(file: File): boolean {

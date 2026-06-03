@@ -307,7 +307,12 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="No file provided")
 
     try:
-        resolved_project_id = await resolve_project_id(db, project_id)
+        resolved_project_id = await resolve_project_id(
+            db,
+            project_id,
+            user=auth.user if auth else None,
+            session=auth.session if auth else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -353,7 +358,12 @@ async def init_chunk_upload(
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     try:
-        resolved_project_id = await resolve_project_id(db, data.project_id)
+        resolved_project_id = await resolve_project_id(
+            db,
+            data.project_id,
+            user=auth.user if auth else None,
+            session=auth.session if auth else None,
+        )
         await _ensure_project_access(db, auth, resolved_project_id)
         session = create_session(
             filename=normalize_filename(data.filename),
@@ -366,6 +376,8 @@ async def init_chunk_upload(
         raise HTTPException(status_code=413, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.exception("Chunk upload init failed")
         raise HTTPException(status_code=500, detail=f"Upload init failed: {e}") from e
@@ -565,7 +577,12 @@ async def register_from_blob(
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
     try:
-        resolved_project_id = await resolve_project_id(db, project_id)
+        resolved_project_id = await resolve_project_id(
+            db,
+            project_id,
+            user=auth.user if auth else None,
+            session=auth.session if auth else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

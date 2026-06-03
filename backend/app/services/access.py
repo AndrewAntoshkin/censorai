@@ -26,7 +26,7 @@ def can_access_project(
     user: User | None, project: Project, session: AuthSession | None = None
 ) -> bool:
     if project.id == UNASSIGNED_PROJECT_ID:
-        return False
+        return user is not None or not auth_required()
     if user is None:
         return not auth_required()
 
