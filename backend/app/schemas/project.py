@@ -52,10 +52,34 @@ class VideoFileResponse(BaseModel):
 
 
 class BlobUploadRequest(BaseModel):
-    blob_url: str
+    """After client upload to Blob or R2/S3 presigned PUT."""
+
     filename: str
     size: int
+    blob_url: str | None = None
+    storage_path: str | None = None
     duration_seconds: float | None = None
+
+
+class PresignUploadRequest(BaseModel):
+    filename: str
+    size: int
+    project_id: str | None = None
+    content_type: str | None = None
+
+
+class PresignUploadResponse(BaseModel):
+    upload_url: str
+    storage_path: str
+    method: str = "PUT"
+    headers: dict[str, str]
+
+
+class UploadStrategyResponse(BaseModel):
+    method: str
+    blob_available: bool = False
+    object_storage: bool = False
+    message: str | None = None
 
 
 class ChunkUploadInitRequest(BaseModel):

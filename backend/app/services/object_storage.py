@@ -59,6 +59,36 @@ def upload_file(key: str, source_path: Path, *, content_type: str = "video/mp4")
     return f"s3://{settings.S3_BUCKET}/{key}"
 
 
+def presign_put_upload(
+    key: str,
+    *,
+    content_type: str = "video/mp4",
+    size: int | None = None,
+    ttl_seconds: int = 3600,
+) -> dict:
+    """Presigned PUT for direct browser upload to R2/S3."""
+    bucket = settings.S3_BUCKET
+    params: dict = {
+        "Bucket": bucket,
+        "Key": key,
+        "ContentType": content_type,
+    }
+    if size is not None and size > 0:
+        params["ContentLength"] = size
+    upload_url = _client().generate_presigned_url(
+        "put_object",
+        Params=params,
+        ExpiresIn=ttl_seconds,
+    )
+    storage_uri = f"s3://{bucket}/{key}"
+    return {
+        "upload_url": upload_url,
+        "storage_path": storage_uri,
+        "method": "PUT",
+        "headers": {"Content-Type": content_type},
+    }
+
+
 def presigned_get_url(storage_uri: str, ttl_seconds: int | None = None) -> str:
     """Return HTTPS URL for s3://bucket/key or pass through http(s) URLs."""
     if storage_uri.startswith(("http://", "https://")):

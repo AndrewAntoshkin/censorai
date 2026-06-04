@@ -55,6 +55,12 @@ cd frontend && npm run build
 
 Подключение store: Storage → выбрать store → **Connect to Project** → сервис **backend**.
 
+### R2 (рекомендуется для больших файлов, ~10 GB free)
+
+Без R2 prod использует Vercel Blob (1 GB Hobby). Настройка один раз: **[scripts/setup-r2.md](../scripts/setup-r2.md)**.
+
+После `S3_*` на backend: `GET /api/files/upload-strategy` → `"method":"s3"`.
+
 ---
 
 ## Деплой

@@ -93,6 +93,9 @@ async def health_check():
             "has_storage_url": bool(os.getenv("STORAGE_URL", "").strip()),
             "has_replicate_token": settings.analysis_ready,
             "has_blob_token": bool(settings.BLOB_READ_WRITE_TOKEN.strip()),
+            "has_object_storage": bool(
+                settings.S3_BUCKET.strip() and settings.S3_ACCESS_KEY.strip()
+            ),
             "replicate_max_output_tokens": settings.REPLICATE_MAX_OUTPUT_TOKENS,
             "analysis_max_coverage_retries": settings.ANALYSIS_MAX_COVERAGE_RETRIES,
             "auth_required": settings.AUTH_REQUIRED,

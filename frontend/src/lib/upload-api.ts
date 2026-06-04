@@ -57,6 +57,24 @@ function isBlobQuotaError(message: string): boolean {
   );
 }
 
+type UploadStrategy = "s3" | "blob" | "none";
+
+let cachedStrategy: UploadStrategy | null = null;
+
+async function fetchUploadStrategy(): Promise<UploadStrategy> {
+  if (cachedStrategy) return cachedStrategy;
+  try {
+    const res = await apiFetch(`${getApiBase()}/api/files/upload-strategy`);
+    if (!res.ok) return "blob";
+    const data = (await res.json()) as { method?: string };
+    const method = data.method === "s3" || data.method === "blob" ? data.method : "none";
+    cachedStrategy = method;
+    return method;
+  } catch {
+    return "blob";
+  }
+}
+
 async function blobStorageWritable(): Promise<boolean> {
   try {
     const res = await apiFetch(`${getApiBase()}/api/files/blob-selftest`, {
@@ -239,36 +257,96 @@ async function uploadViaBlob(
   }
 }
 
-async function registerBlobAndAnalyze(
+async function registerStorageAndAnalyze(
   file: File,
   projectId: string | undefined,
-  blobUrl: string,
+  storagePath: string,
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   onProgress(88, "Проверка длительности…");
   const durationSeconds = await readVideoDurationSeconds(file);
   onProgress(90, "Регистрация и запуск анализа…");
+  const body: Record<string, unknown> = {
+    filename: file.name,
+    size: file.size,
+    ...(durationSeconds !== undefined ? { duration_seconds: durationSeconds } : {}),
+  };
+  if (storagePath.startsWith("s3://")) {
+    body.storage_path = storagePath;
+  } else {
+    body.blob_url = storagePath;
+  }
   const res = await apiFetch(
     `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        blob_url: blobUrl,
-        filename: file.name,
-        size: file.size,
-        ...(durationSeconds !== undefined
-          ? { duration_seconds: durationSeconds }
-          : {}),
-      }),
+      body: JSON.stringify(body),
     }
   );
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Register failed: ${res.status} ${body}`);
+    const text = await res.text();
+    throw new Error(`Register failed: ${res.status} ${text}`);
   }
   onProgress(100, "Файл загружен");
   return res.json();
+}
+
+function uploadViaS3Presigned(
+  file: File,
+  projectId: string | undefined,
+  onProgress: (progress: number, hint?: string) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    (async () => {
+      onProgress(5, "Подготовка загрузки в R2…");
+      const presignRes = await apiFetch(`${getApiBase()}/api/files/presign-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          size: file.size,
+          ...(projectId ? { project_id: projectId } : {}),
+          content_type: file.type || "video/mp4",
+        }),
+      });
+      if (!presignRes.ok) {
+        const body = await presignRes.text();
+        reject(new Error(`Presign failed: ${presignRes.status} ${body}`));
+        return;
+      }
+      const presign = (await presignRes.json()) as {
+        upload_url: string;
+        storage_path: string;
+        method: string;
+        headers: Record<string, string>;
+      };
+
+      const xhr = new XMLHttpRequest();
+      xhr.open(presign.method || "PUT", presign.upload_url);
+      const headers = presign.headers || {};
+      for (const [key, value] of Object.entries(headers)) {
+        xhr.setRequestHeader(key, value);
+      }
+
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        const pct = Math.round((ev.loaded / ev.total) * 85);
+        onProgress(Math.max(5, pct), `Загрузка в хранилище… ${Math.round((ev.loaded / ev.total) * 100)}%`);
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(presign.storage_path);
+        } else {
+          reject(new Error(`R2 upload failed: ${xhr.status} ${xhr.responseText}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Сбой сети при загрузке в R2"));
+      xhr.onabort = () => reject(new Error("Загрузка отменена"));
+      xhr.send(file);
+    })().catch(reject);
+  });
 }
 
 async function uploadViaChunks(
@@ -351,6 +429,20 @@ export async function uploadFileToProject(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload()) {
+    const strategy = await fetchUploadStrategy();
+
+    if (strategy === "s3") {
+      const storagePath = await uploadViaS3Presigned(file, projectId, onProgress);
+      return registerStorageAndAnalyze(file, projectId, storagePath, onProgress);
+    }
+
+    if (strategy === "none") {
+      throw new Error(
+        "Нет хранилища для загрузки. Подключите Cloudflare R2 (переменные S3_*) " +
+          "или освободите Vercel Blob."
+      );
+    }
+
     const blobWritable = await blobStorageWritable();
     if (!blobWritable) {
       if (!canFallbackToChunks(file)) {
@@ -364,7 +456,7 @@ export async function uploadFileToProject(
 
     try {
       const blob = await uploadViaBlob(file, uploadUrl, onProgress);
-      return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+      return registerStorageAndAnalyze(file, projectId, blob.url, onProgress);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(message)) {
@@ -377,7 +469,7 @@ export async function uploadFileToProject(
       onProgress(3, "Повторная попытка загрузки…");
       try {
         const blob = await uploadViaBlob(file, uploadUrl, onProgress);
-        return registerBlobAndAnalyze(file, projectId, blob.url, onProgress);
+        return registerStorageAndAnalyze(file, projectId, blob.url, onProgress);
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
         if (retryMsg === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(retryMsg)) {

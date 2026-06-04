@@ -23,7 +23,8 @@ from app.services.analysis_coverage import (
     parse_timecode_seconds,
 )
 from app.services.analysis_jobs import get_job_metadata, set_job_metadata
-from app.services.blob_storage import blob_enabled, delete_urls, put_bytes
+from app.services.blob_storage import blob_enabled, blob_write_available, delete_urls, put_bytes
+from app.services.object_storage import delete_object
 from app.services.video_segmentation import (
     needs_segmentation,
     plan_segment_ranges,
@@ -114,7 +115,17 @@ async def _upload_segment(video_id: str, index: int, local_path: str) -> str:
     path = Path(local_path)
     data = path.read_bytes()
 
-    if blob_enabled():
+    from app.services.object_storage import object_storage_enabled, upload_bytes
+
+    if object_storage_enabled():
+        key = f"segments/{video_id}_seg{index}.mp4"
+
+        def _put_s3() -> str:
+            return upload_bytes(key, data, content_type="video/mp4")
+
+        return await asyncio.to_thread(_put_s3)
+
+    if blob_enabled() and blob_write_available():
         blob_path = f"videos/{video_id}_seg{index}.mp4"
 
         def _put() -> str:
@@ -128,8 +139,7 @@ async def _upload_segment(video_id: str, index: int, local_path: str) -> str:
 
     if path.stat().st_size / (1024 * 1024) > 4:
         raise RuntimeError(
-            "Для длинного ролика без Vercel Blob нельзя отправить части в Replicate. "
-            "Добавьте BLOB_READ_WRITE_TOKEN."
+            "Для длинного ролика нужен R2/S3 (S3_*) или свободный Vercel Blob."
         )
     return local_path
 
@@ -222,7 +232,12 @@ async def advance_after_segment(
 
 async def _cleanup_segment_blobs(metadata: dict) -> None:
     urls = metadata.get("segment_urls") or []
-    await asyncio.to_thread(delete_urls, [u for u in urls if isinstance(u, str)])
+    blob_urls = [u for u in urls if isinstance(u, str) and u.startswith("http")]
+    s3_uris = [u for u in urls if isinstance(u, str) and u.startswith("s3://")]
+    if blob_urls:
+        await asyncio.to_thread(delete_urls, blob_urls)
+    for uri in s3_uris:
+        await asyncio.to_thread(delete_object, uri)
 
 
 def merge_segment_results(

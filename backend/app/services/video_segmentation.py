@@ -79,6 +79,11 @@ def probe_duration_seconds(
         else:
             return None
 
+    if storage_path.startswith("s3://"):
+        from app.services.object_storage import presigned_get_url
+
+        storage_path = presigned_get_url(storage_path)
+
     if storage_path.startswith(("http://", "https://")):
         probed = _ffprobe_duration(storage_path)
         if probed:
@@ -104,6 +109,12 @@ def _segment_source(storage_path: str, *, file_id: str | None = None) -> tuple[s
 
     if storage_path.startswith(("http://", "https://")):
         return storage_path, []
+
+    if storage_path.startswith("s3://"):
+        from app.services.object_storage import presigned_get_url
+
+        return presigned_get_url(storage_path), []
+
     source, temps = _resolve_local_paths(storage_path)
     if not source:
         raise FileNotFoundError("Не удалось получить локальный файл для нарезки")

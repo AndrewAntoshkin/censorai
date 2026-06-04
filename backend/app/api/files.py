@@ -26,6 +26,9 @@ from app.schemas.project import (
     ChunkUploadInitRequest,
     ChunkUploadInitResponse,
     ChunkUploadStatusResponse,
+    PresignUploadRequest,
+    PresignUploadResponse,
+    UploadStrategyResponse,
     VideoFileResponse,
 )
 from app.services.project_buckets import is_system_project, resolve_project_id
@@ -44,6 +47,7 @@ from app.services.analysis_coverage import (
 from app.services.analysis_finish import maybe_finish_analysis
 from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
+from app.services.object_storage import build_object_key
 from app.services.storage_service import storage_service
 from app.services.legal_compliance import enrich_analysis_summary
 from app.services.video_blob_cleanup import release_video_blob
@@ -630,6 +634,94 @@ async def blob_client_upload(request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+def _resolve_storage_path(data: BlobUploadRequest) -> str:
+    path = (data.storage_path or data.blob_url or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="storage_path or blob_url required")
+    if not (
+        path.startswith("http://")
+        or path.startswith("https://")
+        or path.startswith("s3://")
+    ):
+        raise HTTPException(status_code=400, detail="Invalid storage path")
+    return path
+
+
+@router.get("/upload-strategy", response_model=UploadStrategyResponse)
+async def upload_strategy():
+    from app.services.blob_storage import blob_enabled, blob_write_available
+    from app.services.object_storage import object_storage_enabled
+
+    s3 = object_storage_enabled()
+    blob_ok = False
+    if blob_enabled():
+        try:
+            blob_ok = await asyncio.to_thread(blob_write_available)
+        except Exception:
+            blob_ok = False
+
+    if s3:
+        return UploadStrategyResponse(
+            method="s3",
+            object_storage=True,
+            blob_available=blob_ok,
+        )
+    if blob_ok:
+        return UploadStrategyResponse(method="blob", blob_available=True)
+    return UploadStrategyResponse(
+        method="none",
+        blob_available=False,
+        message=(
+            "Нет доступного хранилища: подключите Cloudflare R2 (S3_*) "
+            "или освободите Vercel Blob (1 ГБ на Hobby)."
+        ),
+    )
+
+
+@router.post("/presign-upload", response_model=PresignUploadResponse)
+async def presign_upload(
+    data: PresignUploadRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: CurrentAuth | None = Depends(require_auth_if_enabled),
+):
+    from app.services.object_storage import object_storage_enabled, presign_put_upload
+
+    if not object_storage_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Object storage not configured (S3_ENDPOINT_URL, S3_BUCKET, keys).",
+        )
+
+    size_mb = data.size / (1024 * 1024)
+    if size_mb > settings.UPLOAD_MAX_SIZE_MB:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
+        )
+
+    try:
+        resolved_project_id = await resolve_project_id(
+            db,
+            data.project_id,
+            user=auth.user if auth else None,
+            session=auth.session if auth else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    await _ensure_project_access(db, auth, resolved_project_id)
+
+    content_type = data.content_type or mimetypes.guess_type(data.filename)[0] or "video/mp4"
+    key = build_object_key(resolved_project_id, data.filename)
+    payload = await asyncio.to_thread(
+        presign_put_upload,
+        key,
+        content_type=content_type,
+        size=data.size,
+    )
+    return PresignUploadResponse(**payload)
+
+
 @router.post("/from-blob", response_model=VideoFileResponse, status_code=201)
 async def register_from_blob(
     data: BlobUploadRequest,
@@ -658,6 +750,8 @@ async def register_from_blob(
             detail=f"File too large: {size_mb:.1f}MB (max {settings.UPLOAD_MAX_SIZE_MB}MB)",
         )
 
+    storage_path = _resolve_storage_path(data)
+
     video = VideoFile(
         name=normalize_filename(data.filename),
         size=data.size,
@@ -665,7 +759,7 @@ async def register_from_blob(
         progress=100,
         project_id=resolved_project_id,
         folder_id=folder_id,
-        storage_path=data.blob_url,
+        storage_path=storage_path,
         duration_seconds=data.duration_seconds,
     )
     db.add(video)
