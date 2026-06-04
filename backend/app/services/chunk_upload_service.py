@@ -64,8 +64,8 @@ def _use_db_sessions() -> bool:
 
 
 def _use_pg_parts() -> bool:
-    """Store 3 MB parts in Postgres on Vercel (shared across invocations, saves Blob quota)."""
-    return _use_db_sessions() and bool(os.getenv("VERCEL"))
+    """Disabled: Neon project limit (~512 MB) cannot hold multi-hundred-MB uploads."""
+    return False
 
 
 def _use_blob_parts() -> bool:

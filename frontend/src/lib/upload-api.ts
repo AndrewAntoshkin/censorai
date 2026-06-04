@@ -7,14 +7,26 @@ function apiFetch(input: string, init?: RequestInit) {
 const CHUNK_SIZE = 3 * 1024 * 1024;
 const BLOB_MULTIPART_THRESHOLD = 4 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+/** Chunk-via-API needs Blob or disk; never Postgres for large files on Vercel. */
+const MAX_CHUNK_FALLBACK_BYTES = 50 * 1024 * 1024;
+
+function blobQuotaUserMessage(): string {
+  return (
+    "Хранилище Vercel Blob переполнено (лимит Hobby — 1 ГБ). " +
+    "Очистите Storage → Blob в Vercel Dashboard или вызовите очистку с сервера. " +
+    "Загрузка через базу данных для больших файлов недоступна."
+  );
+}
 
 function formatChunkUploadError(status: number, body: string, part: number, total: number): string {
   const lower = body.toLowerCase();
   if (lower.includes("storage quota exceeded") || lower.includes("quota exceeded")) {
+    return blobQuotaUserMessage();
+  }
+  if (lower.includes("diskfull") || lower.includes("project size limit")) {
     return (
-      "Хранилище Vercel Blob переполнено (лимит Hobby — 1 ГБ). " +
-      "Очистите Storage → Blob в Vercel или обновите тариф. " +
-      "После успешного анализа новые видео удаляются с Blob автоматически."
+      "База Neon переполнена (лимит ~512 МБ на проект). " +
+      "Очистите Vercel Blob и не используйте загрузку через чанки для больших файлов."
     );
   }
   return `Chunk ${part + 1}/${total} failed: ${status} ${body}`;
@@ -329,6 +341,10 @@ async function uploadViaChunks(
   return completeRes.json();
 }
 
+function canFallbackToChunks(file: File): boolean {
+  return file.size <= MAX_CHUNK_FALLBACK_BYTES;
+}
+
 export async function uploadFileToProject(
   file: File,
   projectId: string | undefined,
@@ -337,7 +353,10 @@ export async function uploadFileToProject(
   if (shouldUseBlobUpload()) {
     const blobWritable = await blobStorageWritable();
     if (!blobWritable) {
-      onProgress(2, "Blob переполнен — загрузка через сервер…");
+      if (!canFallbackToChunks(file)) {
+        throw new Error(blobQuotaUserMessage());
+      }
+      onProgress(2, "Blob переполнен — пробуем малую загрузку через API…");
       return uploadViaChunks(file, projectId, onProgress);
     }
 
@@ -349,7 +368,10 @@ export async function uploadFileToProject(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(message)) {
-        onProgress(2, "Blob переполнен — загрузка через сервер…");
+        if (!canFallbackToChunks(file)) {
+          throw new Error(blobQuotaUserMessage());
+        }
+        onProgress(2, "Blob переполнен — пробуем загрузку через API…");
         return uploadViaChunks(file, projectId, onProgress);
       }
       onProgress(3, "Повторная попытка загрузки…");
@@ -359,7 +381,9 @@ export async function uploadFileToProject(
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
         if (retryMsg === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(retryMsg)) {
-          onProgress(2, "Blob переполнен — загрузка через сервер…");
+          if (!canFallbackToChunks(file)) {
+            throw new Error(blobQuotaUserMessage());
+          }
           return uploadViaChunks(file, projectId, onProgress);
         }
         throw retryErr;

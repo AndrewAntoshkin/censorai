@@ -32,6 +32,11 @@ def blob_enabled() -> bool:
 _BLOB_WRITE_OK: bool | None = None
 
 
+def reset_blob_write_cache() -> None:
+    global _BLOB_WRITE_OK
+    _BLOB_WRITE_OK = None
+
+
 def blob_write_available() -> bool:
     """False when Blob store cannot accept new writes (e.g. Hobby 1 GB quota)."""
     global _BLOB_WRITE_OK

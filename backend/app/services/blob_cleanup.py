@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import VideoFile
+from app.models.upload_chunk_part import UploadChunkPart
 from app.models.upload_session import UploadChunkSession
 from app.services.blob_storage import blob_enabled, delete_urls, list_all_blobs, put_bytes
 
@@ -56,6 +57,7 @@ async def prune_blob_storage(db: AsyncSession, *, dry_run: bool = False) -> dict
         to_delete.append(url)
 
     chunk_sessions = (await db.execute(select(UploadChunkSession.id))).all()
+    chunk_parts_count = len((await db.execute(select(UploadChunkPart.session_id))).all())
 
     result = {
         "dry_run": dry_run,
@@ -64,17 +66,23 @@ async def prune_blob_storage(db: AsyncSession, *, dry_run: bool = False) -> dict
         "keep_urls_count": len(keep_urls),
         "delete_count": len(to_delete),
         "upload_chunk_sessions": len(chunk_sessions),
+        "upload_chunk_parts_rows": chunk_parts_count,
     }
 
     if dry_run:
         return result
 
     delete_urls(to_delete)
-    if chunk_sessions:
-        await db.execute(delete(UploadChunkSession))
-        await db.flush()
+    await db.execute(delete(UploadChunkPart))
+    await db.execute(delete(UploadChunkSession))
+    await db.flush()
+
+    from app.services.blob_storage import reset_blob_write_cache
+
+    reset_blob_write_cache()
 
     result["deleted"] = len(to_delete)
+    result["chunk_parts_cleared"] = chunk_parts_count
     try:
         put_bytes("selftest/probe-after-cleanup.txt", b"ok", add_random_suffix=True)
         result["probe_ok"] = True
