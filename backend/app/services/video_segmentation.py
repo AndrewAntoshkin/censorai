@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import httpx
@@ -122,6 +123,32 @@ def _segment_source(storage_path: str, *, file_id: str | None = None) -> tuple[s
     return source, temps
 
 
+def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
+    """Delete leaked segment temp files from prior (possibly killed) invocations.
+
+    Vercel reuses /tmp (~512 MB) across warm invocations. A run that is killed
+    mid-cut (timeout/OOM) leaves its 100+ MB segment file behind; after enough
+    invocations these accumulate and overflow /tmp, making later cuts fail with
+    "No space left on device". We sweep before each cut so only the current
+    segment occupies disk. Files younger than `max_age_seconds` are left alone
+    to avoid touching anything an in-flight cut just created.
+    """
+    tmpdir = Path(tempfile.gettempdir())
+    now = time.time()
+    freed = 0
+    for pattern in ("*_seg*.mp4", "*_seg*.mp4.*"):
+        for path in tmpdir.glob(pattern):
+            try:
+                stat = path.stat()
+                if now - stat.st_mtime > max_age_seconds:
+                    freed += stat.st_size
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if freed:
+        logger.info("Swept %.1f MB of stale segment temps from /tmp", freed / 1024 / 1024)
+
+
 def prepare_single_segment_file(
     storage_path: str,
     start_sec: int,
@@ -137,6 +164,7 @@ def prepare_single_segment_file(
             f"{settings.REPLICATE_MAX_VIDEO_MINUTES} мин нужна нарезка через ffmpeg."
         )
 
+    _sweep_stale_segment_temps()
     source, source_temps = _segment_source(storage_path, file_id=file_id)
     out = Path(tempfile.mkstemp(suffix=f"_seg{index}.mp4")[1])
     try:

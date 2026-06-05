@@ -122,20 +122,22 @@ async def _cut_and_upload_segment(
 
 async def _upload_segment(video_id: str, index: int, local_path: str) -> str:
     path = Path(local_path)
-    data = path.read_bytes()
 
-    from app.services.object_storage import object_storage_enabled, upload_bytes
+    from app.services.object_storage import object_storage_enabled, upload_file
 
     if object_storage_enabled():
         key = f"segments/{video_id}_seg{index}.mp4"
 
+        # Stream from disk (boto3 multipart) — never load the whole segment into
+        # memory; a 35-min HD segment can be hundreds of MB.
         def _put_s3() -> str:
-            return upload_bytes(key, data, content_type="video/mp4")
+            return upload_file(key, path, content_type="video/mp4")
 
         return await asyncio.to_thread(_put_s3)
 
     if blob_enabled() and blob_write_available():
         blob_path = f"videos/{video_id}_seg{index}.mp4"
+        data = path.read_bytes()
 
         def _put() -> str:
             result = put_bytes(blob_path, data, content_type="video/mp4")
