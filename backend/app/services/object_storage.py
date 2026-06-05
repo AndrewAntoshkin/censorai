@@ -201,6 +201,73 @@ def configure_cors(origins: list[str]) -> dict:
     return {"bucket": bucket, "cors_rules": rules}
 
 
+def list_keys(prefix: str = "", limit: int = 100) -> list[dict]:
+    bucket = _bucket()
+    client = _client()
+    out: list[dict] = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents") or []:
+            out.append(
+                {
+                    "key": obj["Key"],
+                    "size_mb": round(obj["Size"] / (1024 * 1024), 1),
+                    "modified": obj["LastModified"].isoformat(),
+                }
+            )
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def probe_object(key: str) -> dict:
+    """ffprobe a stored object via presigned URL — returns container/codec info."""
+    import json as _json
+    import subprocess
+
+    from app.services.media_ffmpeg import ffprobe_binary
+
+    url = presigned_get_url(f"s3://{_bucket()}/{key}")
+    probe = ffprobe_binary()
+    if not probe:
+        return {"error": "ffprobe not available"}
+    cmd = [
+        probe,
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        url,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+    if proc.returncode != 0:
+        return {"error": (proc.stderr or "")[:500], "returncode": proc.returncode}
+    try:
+        data = _json.loads(proc.stdout or "{}")
+    except ValueError:
+        return {"raw": (proc.stdout or "")[:1000]}
+    streams = [
+        {
+            "type": s.get("codec_type"),
+            "codec": s.get("codec_name"),
+            "profile": s.get("profile"),
+            "pix_fmt": s.get("pix_fmt"),
+            "width": s.get("width"),
+            "height": s.get("height"),
+        }
+        for s in data.get("streams", [])
+    ]
+    fmt = data.get("format", {})
+    return {
+        "format_name": fmt.get("format_name"),
+        "duration": fmt.get("duration"),
+        "size": fmt.get("size"),
+        "streams": streams,
+    }
+
+
 def selftest() -> dict:
     """Diagnostic: report config presence and try a presign + put + delete."""
     info: dict = {

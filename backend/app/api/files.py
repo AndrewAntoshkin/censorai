@@ -704,6 +704,28 @@ async def object_storage_selftest(request: Request):
     return await asyncio.to_thread(selftest)
 
 
+@router.get("/object-storage-ls")
+async def object_storage_ls(request: Request):
+    from app.services.object_storage import list_keys
+
+    if request.query_params.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    prefix = request.query_params.get("prefix", "")
+    return await asyncio.to_thread(list_keys, prefix)
+
+
+@router.get("/object-storage-probe")
+async def object_storage_probe(request: Request):
+    from app.services.object_storage import probe_object
+
+    if request.query_params.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    key = request.query_params.get("key")
+    if not key:
+        raise HTTPException(status_code=400, detail="key required")
+    return await asyncio.to_thread(probe_object, key)
+
+
 @router.post("/object-storage-cors-setup")
 async def object_storage_cors_setup(request: Request):
     from app.services.object_storage import configure_cors, object_storage_enabled
