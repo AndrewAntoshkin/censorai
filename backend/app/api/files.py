@@ -813,6 +813,92 @@ async def object_storage_cors_setup(request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post("/object-storage-delete")
+async def object_storage_delete(request: Request):
+    from app.services.object_storage import _bucket, delete_object
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    keys = payload.get("keys") or []
+    bucket = _bucket()
+    deleted = []
+    for key in keys:
+        try:
+            await asyncio.to_thread(delete_object, f"s3://{bucket}/{key}")
+            deleted.append(key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("delete %s failed: %s", key, exc)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+@router.post("/admin-provision-org")
+async def admin_provision_org(request: Request, db: AsyncSession = Depends(get_db)):
+    """One-off: create an organization, an invite code, and member users."""
+    from app.models.organization import Organization, RegistrationCode
+    from app.models.user import User
+    from app.services.auth_service import hash_password
+    from app.services.organization_service import normalize_registration_code
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    org_name = payload["org_name"]
+    org_slug = payload["org_slug"]
+    code_value = normalize_registration_code(payload["code"])
+    users = payload.get("users") or []
+
+    org = (
+        await db.execute(select(Organization).where(Organization.slug == org_slug))
+    ).scalar_one_or_none()
+    org_created = False
+    if org is None:
+        org = Organization(name=org_name, slug=org_slug)
+        db.add(org)
+        await db.flush()
+        org_created = True
+
+    code_row = (
+        await db.execute(
+            select(RegistrationCode).where(RegistrationCode.code == code_value)
+        )
+    ).scalar_one_or_none()
+    if code_row is None:
+        db.add(
+            RegistrationCode(
+                code=code_value, organization_id=org.id, label=f"{org_name} invite"
+            )
+        )
+
+    results = []
+    for u in users:
+        email = u["email"].strip().lower()
+        existing = (
+            await db.execute(select(User).where(User.email == email))
+        ).scalar_one_or_none()
+        if existing is not None:
+            results.append({"email": email, "status": "exists"})
+            continue
+        db.add(
+            User(
+                email=email,
+                password_hash=hash_password(u["password"]),
+                display_name=u["display_name"],
+                organization_id=org.id,
+                role="member",
+            )
+        )
+        results.append({"email": email, "status": "created"})
+
+    await db.commit()
+    return {
+        "organization": {"name": org.name, "slug": org.slug, "id": org.id, "created": org_created},
+        "code": code_value,
+        "users": results,
+    }
+
+
 @router.post("/presign-upload", response_model=PresignUploadResponse)
 async def presign_upload(
     data: PresignUploadRequest,
