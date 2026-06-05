@@ -54,61 +54,70 @@ async def prepare_segmented_job(
     total_seconds: int,
     extra_prompt_suffix: str = "",
 ) -> dict:
-    """Cut video, upload segment blobs, store plan in job_metadata."""
+    """Plan segment ranges only — cutting happens lazily, one segment per request.
+
+    Vercel /tmp (~512 MB) is reused across warm invocations, so cutting all
+    segments up front in a single request overflows it. Instead we store the
+    plan and cut+upload each segment on demand in `start_segment_prediction`,
+    which runs in a separate invocation per segment.
+    """
     ranges = plan_segment_ranges(total_seconds)
-    storage_path = video.storage_path or ""
-    segment_urls: list[str] = []
-
-    # One segment in /tmp at a time — Vercel /tmp is ~512 MB.
-    for index, (start_sec, duration_sec) in enumerate(ranges):
-        def _cut_one() -> tuple[str, list[Path]]:
-            return prepare_single_segment_file(
-                storage_path,
-                start_sec,
-                duration_sec,
-                index=index,
-                file_id=video.id,
-            )
-
-        local_path, temps = await asyncio.to_thread(_cut_one)
-        try:
-            url = await _upload_segment(video.id, index, local_path)
-            segment_urls.append(url)
-            logger.info(
-                "Long video %s: segment %d/%d uploaded (%s–%s)",
-                video.id,
-                index + 1,
-                len(ranges),
-                format_duration(start_sec),
-                format_duration(start_sec + duration_sec),
-            )
-        finally:
-            for path in temps:
-                try:
-                    Path(path).unlink(missing_ok=True)
-                except OSError:
-                    pass
-
     metadata = {
         "segmented": True,
         "total_duration_sec": total_seconds,
         "ranges": [
             {"start_sec": start, "duration_sec": dur} for start, dur in ranges
         ],
-        "segment_urls": segment_urls,
+        "source_path": video.storage_path or "",
+        "segment_urls": [None] * len(ranges),
         "current_index": 0,
         "partial_results": [],
         "extra_prompt_suffix": extra_prompt_suffix,
     }
     await set_job_metadata(db, video.id, metadata)
-    parts = len(segment_urls)
     logger.info(
-        "Long video %s: cut into %d segment(s) for Replicate (total %s)",
+        "Long video %s: planned %d segment(s), lazy cut (total %s)",
         video.id,
-        parts,
+        len(ranges),
         format_duration(total_seconds),
     )
     return metadata
+
+
+async def _cut_and_upload_segment(
+    video_id: str,
+    index: int,
+    source_path: str,
+    start_sec: int,
+    duration_sec: int,
+) -> str:
+    """Cut one segment from the source, upload it, delete the local temp."""
+    def _cut() -> tuple[str, list[Path]]:
+        return prepare_single_segment_file(
+            source_path,
+            start_sec,
+            duration_sec,
+            index=index,
+            file_id=video_id,
+        )
+
+    local_path, temps = await asyncio.to_thread(_cut)
+    try:
+        url = await _upload_segment(video_id, index, local_path)
+        logger.info(
+            "Long video %s: segment %d uploaded (%s–%s)",
+            video_id,
+            index + 1,
+            format_duration(start_sec),
+            format_duration(start_sec + duration_sec),
+        )
+        return url
+    finally:
+        for path in temps:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 async def _upload_segment(video_id: str, index: int, local_path: str) -> str:
@@ -153,18 +162,31 @@ async def start_segment_prediction(
     from app.services.video_analysis_provider import start_analysis
 
     ranges = metadata["ranges"]
-    urls = metadata["segment_urls"]
-    total_parts = len(urls)
+    total_parts = len(ranges)
     range_row = ranges[index]
     start_sec = range_row["start_sec"]
     duration_sec = range_row["duration_sec"]
+
+    source_path = metadata.get("source_path") or video.storage_path or ""
+    seg_urls = list(metadata.get("segment_urls") or [None] * total_parts)
+    if len(seg_urls) < total_parts:
+        seg_urls += [None] * (total_parts - len(seg_urls))
+
+    url = seg_urls[index]
+    if not url:
+        url = await _cut_and_upload_segment(
+            video.id, index, source_path, start_sec, duration_sec
+        )
+        seg_urls[index] = url
+        metadata["segment_urls"] = seg_urls
+
     extra = (metadata.get("extra_prompt_suffix") or "") + segment_prompt_suffix(
         index, total_parts, start_sec, duration_sec
     )
 
     prediction_id = await asyncio.to_thread(
         start_analysis,
-        urls[index],
+        url,
         file_id=video.id,
         file_size=None,
         expected_duration_seconds=duration_sec,
@@ -191,12 +213,19 @@ async def advance_after_segment(
     partial.append(result.model_dump())
     metadata["partial_results"] = partial
     idx = int(metadata.get("current_index") or 0)
-    urls = metadata.get("segment_urls") or []
+    ranges = metadata.get("ranges") or []
+    total = len(ranges)
 
-    if idx + 1 < len(urls):
+    # Free the just-finished segment blob (Replicate already pulled it).
+    seg_urls = metadata.get("segment_urls") or []
+    if idx < len(seg_urls) and seg_urls[idx]:
+        await _delete_segment_url(seg_urls[idx])
+        seg_urls[idx] = None
+        metadata["segment_urls"] = seg_urls
+
+    if idx + 1 < total:
         metadata["current_index"] = idx + 1
         await set_job_metadata(db, video.id, metadata)
-        total = len(urls)
         logger.info(
             "Long video %s: segment %d/%d done, starting part %d",
             video.id,
@@ -214,7 +243,7 @@ async def advance_after_segment(
     logger.info(
         "Long video %s: all %d segments done, merging results",
         video.id,
-        len(urls),
+        total,
     )
     merged = merge_segment_results(
         partial,
@@ -228,6 +257,15 @@ async def advance_after_segment(
 
     await save_merged(video, db, merged)
     return True
+
+
+async def _delete_segment_url(url: str) -> None:
+    if not isinstance(url, str) or not url:
+        return
+    if url.startswith("s3://"):
+        await asyncio.to_thread(delete_object, url)
+    elif url.startswith("http"):
+        await asyncio.to_thread(delete_urls, [url])
 
 
 async def _cleanup_segment_blobs(metadata: dict) -> None:
