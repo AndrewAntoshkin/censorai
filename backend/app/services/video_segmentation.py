@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 MAX_SEGMENT_SECONDS = settings.REPLICATE_MAX_VIDEO_MINUTES * 60
 MIN_TAIL_SECONDS = 3 * 60
-SHORT_OVERFLOW_FIRST_SECONDS = 40 * 60
+# When the tail after a full chunk would be tiny, use a shorter head + bigger tail.
+SHORT_OVERFLOW_FIRST_SECONDS = MAX_SEGMENT_SECONDS - 5 * 60
 
 
 def needs_segmentation(total_seconds: int) -> bool:

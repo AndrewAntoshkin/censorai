@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     INLINE_VIDEO_MAX_MB: int = 4
     REPLICATE_MEDIA_TTL_SECONDS: int = 7200
     PUBLIC_API_BASE_URL: str = _default_public_api_base()
-    REPLICATE_MAX_VIDEO_MINUTES: int = 45
+    # Gemini rejects ~45 min videos (E006); 40 min works, 45 fails. 35 = safe margin.
+    REPLICATE_MAX_VIDEO_MINUTES: int = 35
 
     REPLICATE_VIDEO_FPS: float = 1
     # Always use 65535 in code (see analysis_coverage.FULL_ANALYSIS_MAX_OUTPUT_TOKENS).
