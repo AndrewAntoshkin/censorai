@@ -223,48 +223,61 @@ def list_keys(prefix: str = "", limit: int = 100) -> list[dict]:
 def probe_object(key: str) -> dict:
     """ffprobe a stored object via presigned URL — returns container/codec info."""
     import json as _json
+    import re
     import subprocess
 
     from app.services.media_ffmpeg import ffprobe_binary
 
     url = presigned_get_url(f"s3://{_bucket()}/{key}")
     probe = ffprobe_binary()
-    if not probe:
-        return {"error": "ffprobe not available"}
-    cmd = [
-        probe,
-        "-v",
-        "error",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        url,
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
-    if proc.returncode != 0:
-        return {"error": (proc.stderr or "")[:500], "returncode": proc.returncode}
-    try:
-        data = _json.loads(proc.stdout or "{}")
-    except ValueError:
-        return {"raw": (proc.stdout or "")[:1000]}
-    streams = [
-        {
-            "type": s.get("codec_type"),
-            "codec": s.get("codec_name"),
-            "profile": s.get("profile"),
-            "pix_fmt": s.get("pix_fmt"),
-            "width": s.get("width"),
-            "height": s.get("height"),
-        }
-        for s in data.get("streams", [])
-    ]
-    fmt = data.get("format", {})
+    if probe:
+        cmd = [
+            probe, "-v", "error", "-print_format", "json",
+            "-show_format", "-show_streams", url,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
+        if proc.returncode == 0:
+            try:
+                data = _json.loads(proc.stdout or "{}")
+                streams = [
+                    {
+                        "type": s.get("codec_type"),
+                        "codec": s.get("codec_name"),
+                        "profile": s.get("profile"),
+                        "pix_fmt": s.get("pix_fmt"),
+                        "width": s.get("width"),
+                        "height": s.get("height"),
+                    }
+                    for s in data.get("streams", [])
+                ]
+                fmt = data.get("format", {})
+                return {
+                    "via": "ffprobe",
+                    "format_name": fmt.get("format_name"),
+                    "duration": fmt.get("duration"),
+                    "streams": streams,
+                }
+            except ValueError:
+                pass
+
+    from app.services.media_ffmpeg import ffmpeg_binary
+
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        return {"error": "no ffprobe/ffmpeg"}
+    proc = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", url],
+        capture_output=True, text=True, timeout=180, check=False,
+    )
+    err = proc.stderr or ""
+    streams = re.findall(r"Stream #\d+:\d+.*?: (\w+): ([^\n]+)", err)
+    duration = re.search(r"Duration:\s*([\d:.]+)", err)
+    fmt = re.search(r"Input #0,\s*([^,]+),", err)
     return {
-        "format_name": fmt.get("format_name"),
-        "duration": fmt.get("duration"),
-        "size": fmt.get("size"),
-        "streams": streams,
+        "via": "ffmpeg",
+        "format": fmt.group(1) if fmt else None,
+        "duration": duration.group(1) if duration else None,
+        "streams": [f"{t}: {d.strip()[:80]}" for t, d in streams],
     }
 
 
