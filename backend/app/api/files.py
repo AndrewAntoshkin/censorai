@@ -695,6 +695,36 @@ async def upload_strategy():
     )
 
 
+@router.get("/object-storage-selftest")
+async def object_storage_selftest(request: Request):
+    from app.services.object_storage import selftest
+
+    if request.query_params.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    return await asyncio.to_thread(selftest)
+
+
+@router.post("/object-storage-cors-setup")
+async def object_storage_cors_setup(request: Request):
+    from app.services.object_storage import configure_cors, object_storage_enabled
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    if not object_storage_enabled():
+        raise HTTPException(status_code=503, detail="Object storage not configured")
+
+    origins = payload.get("origins") or [
+        "https://censorai.vercel.app",
+        "http://localhost:3000",
+    ]
+    try:
+        return await asyncio.to_thread(configure_cors, origins)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("configure_cors failed")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.post("/presign-upload", response_model=PresignUploadResponse)
 async def presign_upload(
     data: PresignUploadRequest,

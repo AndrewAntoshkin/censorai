@@ -440,7 +440,7 @@ export async function uploadFileToProject(
         return registerStorageAndAnalyze(file, projectId, storagePath, onProgress);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (/presign failed|r2 presign/i.test(msg)) {
+        if (/presign failed|r2 presign|r2 upload failed|сбой сети при загрузке в r2/i.test(msg)) {
           clearUploadStrategyCache();
           onProgress(2, "R2 недоступен — загрузка через Vercel Blob…");
           strategy = "blob";

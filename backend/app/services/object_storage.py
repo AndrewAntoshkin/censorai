@@ -175,3 +175,58 @@ def delete_object(storage_uri: str) -> None:
     bucket, key = _parse_s3_uri(storage_uri)
     _client().delete_object(Bucket=bucket, Key=key)
     logger.info("Deleted s3 object %s/%s", bucket, key)
+
+
+def configure_cors(origins: list[str]) -> dict:
+    """Set CORS policy on the bucket so browsers can PUT/GET directly."""
+    bucket = _bucket()
+    cors_config = {
+        "CORSRules": [
+            {
+                "AllowedOrigins": origins,
+                "AllowedMethods": ["GET", "PUT", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
+    }
+    client = _client()
+    client.put_bucket_cors(Bucket=bucket, CORSConfiguration=cors_config)
+    try:
+        current = client.get_bucket_cors(Bucket=bucket)
+        rules = current.get("CORSRules", [])
+    except Exception:  # noqa: BLE001
+        rules = cors_config["CORSRules"]
+    return {"bucket": bucket, "cors_rules": rules}
+
+
+def selftest() -> dict:
+    """Diagnostic: report config presence and try a presign + put + delete."""
+    info: dict = {
+        "bucket": settings.S3_BUCKET.strip(),
+        "endpoint_url": settings.S3_ENDPOINT_URL.strip(),
+        "region": settings.S3_REGION.strip() or "auto",
+        "has_access_key": bool(settings.S3_ACCESS_KEY.strip()),
+        "has_secret_key": bool(settings.S3_SECRET_KEY.strip()),
+        "enabled": object_storage_enabled(),
+    }
+    try:
+        presign = presign_put_upload(
+            f"selftest/probe-{uuid.uuid4().hex[:8]}.txt",
+            content_type="text/plain",
+        )
+        info["presign_ok"] = True
+        info["presign_host"] = urlparse(presign["upload_url"]).netloc
+    except Exception as exc:  # noqa: BLE001
+        info["presign_ok"] = False
+        info["presign_error"] = str(exc)[:300]
+    try:
+        key = f"selftest/rw-{uuid.uuid4().hex[:8]}.txt"
+        upload_bytes(key, b"ok", content_type="text/plain")
+        delete_object(f"s3://{_bucket()}/{key}")
+        info["read_write_ok"] = True
+    except Exception as exc:  # noqa: BLE001
+        info["read_write_ok"] = False
+        info["read_write_error"] = str(exc)[:300]
+    return info
