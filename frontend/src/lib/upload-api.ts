@@ -122,14 +122,27 @@ function readVideoDurationSeconds(file: File): Promise<number | undefined> {
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     video.preload = "metadata";
-    video.onloadedmetadata = () => {
+
+    let settled = false;
+    const finish = (value: number | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       URL.revokeObjectURL(url);
-      resolve(Number.isFinite(video.duration) ? video.duration : undefined);
+      // Release the decoder/file handle so the element can be GC'd.
+      video.removeAttribute("src");
+      video.load();
+      resolve(value);
     };
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(undefined);
-    };
+
+    // Some containers/codecs never fire loadedmetadata or error in the browser
+    // (e.g. moov-at-end or unsupported codec). Never let it block the upload:
+    // fall back to undefined and let the backend probe duration via ffmpeg.
+    const timer = setTimeout(() => finish(undefined), 8000);
+
+    video.onloadedmetadata = () =>
+      finish(Number.isFinite(video.duration) ? video.duration : undefined);
+    video.onerror = () => finish(undefined);
     video.src = url;
   });
 }
@@ -332,21 +345,50 @@ function uploadViaS3Presigned(
         xhr.setRequestHeader(key, value);
       }
 
+      // Watchdog: abort if the upload makes no progress for too long, so a
+      // stalled connection (e.g. stuck at 92%) fails fast instead of hanging.
+      const STALL_MS = 90000;
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      let stalled = false;
+      const armStall = () => {
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          stalled = true;
+          xhr.abort();
+        }, STALL_MS);
+      };
+      const clearStall = () => {
+        if (stallTimer) clearTimeout(stallTimer);
+      };
+      armStall();
+
       xhr.upload.onprogress = (ev) => {
+        armStall();
         if (!ev.lengthComputable) return;
         const pct = Math.round((ev.loaded / ev.total) * 85);
         onProgress(Math.max(5, pct), `Загрузка в хранилище… ${Math.round((ev.loaded / ev.total) * 100)}%`);
       };
 
       xhr.onload = () => {
+        clearStall();
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(presign.storage_path);
         } else {
           reject(new Error(`R2 upload failed: ${xhr.status} ${xhr.responseText}`));
         }
       };
-      xhr.onerror = () => reject(new Error("Сбой сети при загрузке в R2"));
-      xhr.onabort = () => reject(new Error("Загрузка отменена"));
+      xhr.onerror = () => {
+        clearStall();
+        reject(new Error("Сбой сети при загрузке в R2"));
+      };
+      xhr.onabort = () =>
+        reject(
+          new Error(
+            stalled
+              ? "Загрузка в R2 зависла (нет прогресса). Проверьте интернет и повторите."
+              : "Загрузка отменена"
+          )
+        );
       xhr.send(file);
     })().catch(reject);
   });
