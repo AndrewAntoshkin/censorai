@@ -20,14 +20,17 @@ def object_storage_enabled() -> bool:
     return bool(settings.S3_BUCKET.strip() and settings.S3_ACCESS_KEY.strip())
 
 
+def _bucket() -> str:
+    return settings.S3_BUCKET.strip()
+
+
 def _client():
-    endpoint = settings.S3_ENDPOINT_URL.strip() or None
     return boto3.client(
         "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=settings.S3_ACCESS_KEY,
-        aws_secret_access_key=settings.S3_SECRET_KEY,
-        region_name=settings.S3_REGION or None,
+        endpoint_url=settings.S3_ENDPOINT_URL.strip() or None,
+        aws_access_key_id=settings.S3_ACCESS_KEY.strip(),
+        aws_secret_access_key=settings.S3_SECRET_KEY.strip(),
+        region_name=settings.S3_REGION.strip() or None,
         config=Config(signature_version="s3v4"),
     )
 
@@ -39,24 +42,26 @@ def build_object_key(project_id: str, filename: str) -> str:
 
 def upload_bytes(key: str, data: bytes, *, content_type: str = "video/mp4") -> str:
     client = _client()
+    bucket = _bucket()
     client.put_object(
-        Bucket=settings.S3_BUCKET,
+        Bucket=bucket,
         Key=key,
         Body=data,
         ContentType=content_type,
     )
-    return f"s3://{settings.S3_BUCKET}/{key}"
+    return f"s3://{bucket}/{key}"
 
 
 def upload_file(key: str, source_path: Path, *, content_type: str = "video/mp4") -> str:
     client = _client()
+    bucket = _bucket()
     client.upload_file(
         str(source_path),
-        settings.S3_BUCKET,
+        bucket,
         key,
         ExtraArgs={"ContentType": content_type},
     )
-    return f"s3://{settings.S3_BUCKET}/{key}"
+    return f"s3://{bucket}/{key}"
 
 
 def presign_put_upload(
@@ -67,7 +72,7 @@ def presign_put_upload(
     ttl_seconds: int = 3600,
 ) -> dict:
     """Presigned PUT for direct browser upload to R2/S3."""
-    bucket = settings.S3_BUCKET
+    bucket = _bucket()
     params: dict = {
         "Bucket": bucket,
         "Key": key,
@@ -129,7 +134,7 @@ def delete_objects_with_prefix(prefix: str) -> int:
     """Delete all keys under prefix in configured bucket. Returns count deleted."""
     if not object_storage_enabled():
         return 0
-    bucket = settings.S3_BUCKET
+    bucket = _bucket()
     client = _client()
     deleted = 0
     paginator = client.get_paginator("list_objects_v2")
