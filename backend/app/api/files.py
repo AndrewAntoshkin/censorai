@@ -704,6 +704,28 @@ async def object_storage_selftest(request: Request):
     return await asyncio.to_thread(selftest)
 
 
+@router.get("/replicate-prediction-detail")
+async def replicate_prediction_detail(request: Request):
+    if request.query_params.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    pred_id = request.query_params.get("id")
+    if not pred_id:
+        raise HTTPException(status_code=400, detail="id required")
+
+    def _fetch() -> dict:
+        import replicate
+
+        client = replicate.Client(api_token=settings.REPLICATE_API_TOKEN)
+        p = client.predictions.get(pred_id)
+        return {
+            "status": p.status,
+            "error": str(p.error)[:1000] if p.error else None,
+            "logs": (p.logs or "")[-2000:],
+        }
+
+    return await asyncio.to_thread(_fetch)
+
+
 @router.get("/object-storage-ls")
 async def object_storage_ls(request: Request):
     from app.services.object_storage import list_keys
