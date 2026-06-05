@@ -8,13 +8,15 @@
 2. Имя, например: `censorai-videos`
 3. Location: **Europe (EEUR)** или ближе к пользователям
 
-## 2. API token
+## 2. API token (это не «пароль» от аккаунта)
 
 1. R2 → **Manage R2 API Tokens** → **Create API token**
-2. Permissions: **Object Read & Write** на этот bucket
-3. Сохраните:
-   - Access Key ID
-   - Secret Access Key
+2. Permission: **Object Read & Write** на bucket
+3. Сохраните **две строки** (показываются один раз):
+   - **Access Key ID** → `S3_ACCESS_KEY`
+   - **Secret Access Key** → `S3_SECRET_KEY` (длинная секретная строка, не пароль Cloudflare)
+
+Пароль от cloudflare.com здесь **не нужен** — только эти два ключа.
 
 ## 3. Account ID
 

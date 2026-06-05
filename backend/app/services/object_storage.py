@@ -17,20 +17,26 @@ logger = logging.getLogger(__name__)
 
 
 def object_storage_enabled() -> bool:
-    return bool(settings.S3_BUCKET.strip() and settings.S3_ACCESS_KEY.strip())
+    return bool(
+        settings.S3_BUCKET.strip()
+        and settings.S3_ACCESS_KEY.strip()
+        and settings.S3_SECRET_KEY.strip()
+        and settings.S3_ENDPOINT_URL.strip()
+    )
 
 
-def _bucket() -> str:
-    return settings.S3_BUCKET.strip()
+def _endpoint_url() -> str | None:
+    url = settings.S3_ENDPOINT_URL.strip().rstrip("/")
+    return url or None
 
 
 def _client():
     return boto3.client(
         "s3",
-        endpoint_url=settings.S3_ENDPOINT_URL.strip() or None,
+        endpoint_url=_endpoint_url(),
         aws_access_key_id=settings.S3_ACCESS_KEY.strip(),
         aws_secret_access_key=settings.S3_SECRET_KEY.strip(),
-        region_name=settings.S3_REGION.strip() or None,
+        region_name=settings.S3_REGION.strip() or "auto",
         config=Config(signature_version="s3v4"),
     )
 
@@ -64,6 +70,18 @@ def upload_file(key: str, source_path: Path, *, content_type: str = "video/mp4")
     return f"s3://{bucket}/{key}"
 
 
+def _bucket() -> str:
+    return settings.S3_BUCKET.strip()
+
+
+def verify_presign_works() -> None:
+    """Raise if R2/S3 credentials or presign config are invalid."""
+    presign_put_upload(
+        f"selftest/presign-probe-{uuid.uuid4().hex[:8]}.txt",
+        content_type="text/plain",
+    )
+
+
 def presign_put_upload(
     key: str,
     *,
@@ -72,14 +90,13 @@ def presign_put_upload(
     ttl_seconds: int = 3600,
 ) -> dict:
     """Presigned PUT for direct browser upload to R2/S3."""
+    del size  # R2: ContentLength in signature often breaks browser PUT
     bucket = _bucket()
     params: dict = {
         "Bucket": bucket,
         "Key": key,
         "ContentType": content_type,
     }
-    if size is not None and size > 0:
-        params["ContentLength"] = size
     upload_url = _client().generate_presigned_url(
         "put_object",
         Params=params,

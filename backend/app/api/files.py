@@ -650,9 +650,19 @@ def _resolve_storage_path(data: BlobUploadRequest) -> str:
 @router.get("/upload-strategy", response_model=UploadStrategyResponse)
 async def upload_strategy():
     from app.services.blob_storage import blob_enabled, blob_write_available
-    from app.services.object_storage import object_storage_enabled
+    from app.services.object_storage import object_storage_enabled, verify_presign_works
 
-    s3 = object_storage_enabled()
+    s3_configured = object_storage_enabled()
+    s3_ok = False
+    s3_error: str | None = None
+    if s3_configured:
+        try:
+            await asyncio.to_thread(verify_presign_works)
+            s3_ok = True
+        except Exception as exc:
+            s3_error = str(exc)[:200]
+            logger.warning("S3 presign probe failed: %s", s3_error)
+
     blob_ok = False
     if blob_enabled():
         try:
@@ -660,19 +670,26 @@ async def upload_strategy():
         except Exception:
             blob_ok = False
 
-    if s3:
+    if s3_ok:
         return UploadStrategyResponse(
             method="s3",
             object_storage=True,
             blob_available=blob_ok,
         )
     if blob_ok:
-        return UploadStrategyResponse(method="blob", blob_available=True)
+        return UploadStrategyResponse(
+            method="blob",
+            blob_available=True,
+            object_storage=s3_configured,
+            message=s3_error,
+        )
     return UploadStrategyResponse(
         method="none",
         blob_available=False,
-        message=(
-            "Нет доступного хранилища: подключите Cloudflare R2 (S3_*) "
+        object_storage=s3_configured,
+        message=s3_error
+        or (
+            "Нет доступного хранилища: проверьте S3_* (R2) "
             "или освободите Vercel Blob (1 ГБ на Hobby)."
         ),
     )
@@ -713,12 +730,19 @@ async def presign_upload(
 
     content_type = data.content_type or mimetypes.guess_type(data.filename)[0] or "video/mp4"
     key = build_object_key(resolved_project_id, data.filename)
-    payload = await asyncio.to_thread(
-        presign_put_upload,
-        key,
-        content_type=content_type,
-        size=data.size,
-    )
+    try:
+        payload = await asyncio.to_thread(
+            presign_put_upload,
+            key,
+            content_type=content_type,
+            size=data.size,
+        )
+    except Exception as exc:
+        logger.exception("presign-upload failed")
+        raise HTTPException(
+            status_code=503,
+            detail=f"R2 presign failed: {exc}",
+        ) from exc
     return PresignUploadResponse(**payload)
 
 

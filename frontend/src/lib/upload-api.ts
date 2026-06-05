@@ -62,7 +62,6 @@ type UploadStrategy = "s3" | "blob" | "none";
 let cachedStrategy: UploadStrategy | null = null;
 
 async function fetchUploadStrategy(): Promise<UploadStrategy> {
-  if (cachedStrategy) return cachedStrategy;
   try {
     const res = await apiFetch(`${getApiBase()}/api/files/upload-strategy`);
     if (!res.ok) return "blob";
@@ -73,6 +72,10 @@ async function fetchUploadStrategy(): Promise<UploadStrategy> {
   } catch {
     return "blob";
   }
+}
+
+function clearUploadStrategyCache() {
+  cachedStrategy = null;
 }
 
 async function blobStorageWritable(): Promise<boolean> {
@@ -429,17 +432,27 @@ export async function uploadFileToProject(
   onProgress: (progress: number, hint?: string) => void
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload()) {
-    const strategy = await fetchUploadStrategy();
+    let strategy = await fetchUploadStrategy();
 
     if (strategy === "s3") {
-      const storagePath = await uploadViaS3Presigned(file, projectId, onProgress);
-      return registerStorageAndAnalyze(file, projectId, storagePath, onProgress);
+      try {
+        const storagePath = await uploadViaS3Presigned(file, projectId, onProgress);
+        return registerStorageAndAnalyze(file, projectId, storagePath, onProgress);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/presign failed|r2 presign/i.test(msg)) {
+          clearUploadStrategyCache();
+          onProgress(2, "R2 недоступен — загрузка через Vercel Blob…");
+          strategy = "blob";
+        } else {
+          throw err;
+        }
+      }
     }
 
     if (strategy === "none") {
       throw new Error(
-        "Нет хранилища для загрузки. Подключите Cloudflare R2 (переменные S3_*) " +
-          "или освободите Vercel Blob."
+        "Нет хранилища для загрузки. Проверьте S3_* (R2) или освободите Vercel Blob."
       );
     }
 
