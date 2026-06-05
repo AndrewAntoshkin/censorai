@@ -261,8 +261,9 @@ def _ffmpeg_segment(source: str, start_sec: int, duration_sec: int, output: Path
     if not ffmpeg:
         raise RuntimeError("ffmpeg not available")
     # Keep only the first video + audio stream (drop subtitle/data streams that
-    # break Gemini), stream-copy, and move moov to the front (+faststart) so the
-    # model can read the segment. -ss before -i = fast keyframe seek.
+    # make Gemini reject the input with E006). Pure stream-copy — no re-encode,
+    # no faststart second pass — so it fits in the serverless time limit.
+    # -ss before -i = fast keyframe seek over the HTTP/presigned source.
     cmd = [
         ffmpeg,
         "-hide_banner",
@@ -283,8 +284,6 @@ def _ffmpeg_segment(source: str, start_sec: int, duration_sec: int, output: Path
         "copy",
         "-avoid_negative_ts",
         "make_zero",
-        "-movflags",
-        "+faststart",
         str(output),
     ]
     try:
