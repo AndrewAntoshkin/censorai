@@ -704,6 +704,50 @@ async def object_storage_selftest(request: Request):
     return await asyncio.to_thread(selftest)
 
 
+@router.get("/segment-test")
+async def segment_test(request: Request):
+    """Cut a range from a stored source, upload, and start a Replicate prediction."""
+    if request.query_params.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+    key = request.query_params.get("key")
+    if not key:
+        raise HTTPException(status_code=400, detail="key required")
+    start = int(request.query_params.get("start", "0"))
+    dur = int(request.query_params.get("dur", "300"))
+
+    from app.services.object_storage import (
+        _bucket,
+        presigned_get_url,
+        upload_file,
+    )
+    from app.services.video_segmentation import prepare_single_segment_file
+
+    source = f"s3://{_bucket()}/{key}"
+
+    def _cut_upload() -> str:
+        local, temps = prepare_single_segment_file(source, start, dur, index=0)
+        try:
+            test_key = f"segments/segtest_{start}_{dur}.mp4"
+            upload_file(test_key, Path(local), content_type="video/mp4")
+            return test_key
+        finally:
+            for p in temps:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    test_key = await asyncio.to_thread(_cut_upload)
+    url = await asyncio.to_thread(presigned_get_url, f"s3://{_bucket()}/{test_key}")
+
+    from app.services.video_analysis_provider import start_analysis
+
+    prediction_id = await asyncio.to_thread(
+        start_analysis, url, file_id=None, file_size=None, expected_duration_seconds=dur
+    )
+    return {"test_key": test_key, "prediction_id": prediction_id, "start": start, "dur": dur}
+
+
 @router.get("/replicate-prediction-detail")
 async def replicate_prediction_detail(request: Request):
     if request.query_params.get("secret") != "censor-demo-2026":
