@@ -56,6 +56,40 @@ curl -sS https://censorai.vercel.app/api/files/upload-strategy | jq .
 
 В UI загрузка: **«Загрузка в хранилище…»** (R2), не «в облако» (Blob).
 
+## 7. CORS на bucket (ОБЯЗАТЕЛЬНО для загрузки из браузера)
+
+Браузер грузит файл напрямую в R2 по presigned-ссылке. Без CORS-политики
+браузер блокирует PUT → в UI ошибка **«Сбой сети при загрузке в R2»**.
+
+API-токен `Object Read & Write` **не может** ставить CORS (нужны права admin),
+поэтому делается вручную:
+
+1. Cloudflare dashboard → **R2** → bucket `censorai-videos` → **Settings**
+2. Раздел **CORS Policy** → **Add CORS policy** (Edit)
+3. Вставить и сохранить:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://censorai.vercel.app", "http://localhost:3000"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+После сохранения CORS применяется в течение ~30 секунд. Перезагрузка прод не нужна.
+
+## Диагностика
+
+```bash
+# Проверка кредов R2 (presign + чтение/запись с сервера):
+curl -sS "https://censorai.vercel.app/api/files/object-storage-selftest?secret=censor-demo-2026" | jq .
+# presign_ok: true, read_write_ok: true → R2 работает; остаётся только CORS
+```
+
 ## Локально
 
 Добавьте в `backend/.env.secrets`:
