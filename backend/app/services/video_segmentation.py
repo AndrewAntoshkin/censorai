@@ -260,6 +260,9 @@ def _ffmpeg_segment(source: str, start_sec: int, duration_sec: int, output: Path
     ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise RuntimeError("ffmpeg not available")
+    # Keep only the first video + audio stream (drop subtitle/data streams that
+    # break Gemini), stream-copy, and move moov to the front (+faststart) so the
+    # model can read the segment. -ss before -i = fast keyframe seek.
     cmd = [
         ffmpeg,
         "-hide_banner",
@@ -272,10 +275,16 @@ def _ffmpeg_segment(source: str, start_sec: int, duration_sec: int, output: Path
         source,
         "-t",
         str(duration_sec),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
         "-c",
         "copy",
         "-avoid_negative_ts",
         "make_zero",
+        "-movflags",
+        "+faststart",
         str(output),
     ]
     try:
