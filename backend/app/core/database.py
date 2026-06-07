@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 
 import os
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -39,6 +40,18 @@ engine = create_async_engine(
     pool_pre_ping=not _uses_null_pool,
     **engine_kwargs,
 )
+if "sqlite" in settings.DATABASE_URL:
+    # SQLite's built-in lower() only handles ASCII, so ILIKE/lower-based
+    # case-insensitive search silently fails for Cyrillic (e.g. «пр» never
+    # matches «Проект»). Override lower() with a Unicode-aware version so
+    # ilike() behaves like Postgres.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _register_unicode_lower(dbapi_connection, _record):
+        dbapi_connection.create_function(
+            "lower", 1, lambda s: s.lower() if s is not None else None, deterministic=True
+        )
+
+
 async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
