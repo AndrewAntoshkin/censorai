@@ -21,7 +21,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { getUploadJobsSnapshot, subscribeUploadJobs } from "@/lib/upload-jobs";
+import {
+  getUploadJobsSnapshot,
+  markUploadJobNotified,
+  subscribeUploadJobs,
+} from "@/lib/upload-jobs";
 import { useAuth } from "@/contexts/auth-context";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
 
@@ -90,7 +94,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   );
 
   useEffect(() => {
-    const done = jobs.filter((j) => j.status === "done" && j.fileId);
+    // Skip jobs whose toast was already dismissed (persisted in the store, so
+    // it survives sidebar remounts on navigation — e.g. after clicking «Смотреть»).
+    const done = jobs.filter((j) => j.status === "done" && j.fileId && !j.notified);
     if (done.length === 0) return;
     const created: Array<{ id: string; fileId: string; name: string }> = [];
     for (const job of done) {
@@ -102,6 +108,11 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       setReadyToasts((prev) => [...prev, ...created].slice(-3));
     }
   }, [jobs]);
+
+  const dismissToast = (id: string) => {
+    markUploadJobNotified(id);
+    setReadyToasts((prev) => prev.filter((x) => x.id !== id));
+  };
 
   const localPreRegisterCount = jobs.filter(
     (j) =>
@@ -288,18 +299,14 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  setReadyToasts((prev) => prev.filter((x) => x.id !== toast.id))
-                }
+                onClick={() => dismissToast(toast.id)}
                 className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 Закрыть
               </button>
               <Link
                 href={`/file/${toast.fileId}`}
-                onClick={() =>
-                  setReadyToasts((prev) => prev.filter((x) => x.id !== toast.id))
-                }
+                onClick={() => dismissToast(toast.id)}
                 className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
               >
                 Смотреть

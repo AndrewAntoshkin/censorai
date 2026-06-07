@@ -19,6 +19,8 @@ export interface UploadJob {
   error?: string;
   fileId?: string;
   projectId?: string;
+  /** Toast «Отчёт готов» already dismissed — never show it again. */
+  notified?: boolean;
 }
 
 type Listener = () => void;
@@ -46,6 +48,13 @@ export function subscribeUploadJobs(listener: Listener): () => void {
 
 export function getUploadJobsSnapshot(): UploadJob[] {
   return jobs;
+}
+
+/** Mark a finished job's «report ready» toast as dismissed (persists across remounts). */
+export function markUploadJobNotified(jobId: string): void {
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job || job.notified) return;
+  patchJob(jobId, { notified: true });
 }
 
 export function countActiveUploadJobs(): number {
