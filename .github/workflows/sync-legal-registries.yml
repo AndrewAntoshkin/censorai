@@ -1,0 +1,76 @@
+name: Sync legal registries
+
+# Еженедельно тянет реестр иностранных агентов (и др.) из API Минюста и,
+# если данные изменились, коммитит обновлённый JSON. Render по autoDeploy
+# передеплоит API, и новый процесс подхватит свежий реестр.
+
+on:
+  schedule:
+    # Суббота 03:00 UTC (~06:00 МСК). Минюст обновляет реестр обычно по пятницам.
+    - cron: "0 3 * * 6"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-legal-registries
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install "httpx>=0.28.0"
+
+      - name: Read current registry count
+        id: before
+        run: |
+          old=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('backend/app/data/registries/meta.json').read_text()).get('foreign_agents_count',0))")
+          echo "count=$old" >> "$GITHUB_OUTPUT"
+          echo "Current foreign-agent entries: $old"
+
+      - name: Sync registries
+        run: python scripts/sync_legal_registries.py
+        working-directory: backend
+
+      - name: Guard against degraded data
+        env:
+          OLD_COUNT: ${{ steps.before.outputs.count }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, sys
+          fa = json.loads(pathlib.Path("backend/app/data/registries/foreign_agents.json").read_text())
+          source, new = fa.get("source", ""), int(fa.get("count", 0))
+          old = int(os.environ["OLD_COUNT"])
+          print(f"source={source} new={new} old={old}")
+          # Не перезаписываем хорошие данные урезанным зеркалом или подозрительно
+          # маленьким списком (допускаем естественную убыль до 10%).
+          if source != "minjust_api":
+              sys.exit(f"::error::Minjust API unavailable — fell back to '{source}'. "
+                       "Skipping commit to avoid regressing the registry.")
+          if new < old * 0.9:
+              sys.exit(f"::error::New count ({new}) dropped >10% below current ({old}). "
+                       "Skipping commit — verify manually.")
+          PY
+
+      - name: Commit changes if registries updated
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          if git diff --quiet -- backend/app/data/registries; then
+            echo "No registry changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/app/data/registries
+          count=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('backend/app/data/registries/meta.json').read_text())['foreign_agents_count'])")
+          git commit -m "chore: weekly legal registry sync (foreign agents: ${count})"
+          git push
