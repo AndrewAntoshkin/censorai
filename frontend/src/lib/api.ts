@@ -89,6 +89,16 @@ function demoRequest<T>(path: string, options?: RequestInit): T {
     return getDemoProjects() as T;
   }
 
+  const searchMatch = path.match(/^\/api\/search\?q=([^&]*)/);
+  if (searchMatch) {
+    const q = decodeURIComponent(searchMatch[1]).toLowerCase();
+    const projects = getDemoProjects().filter((p) =>
+      p.name.toLowerCase().includes(q)
+    );
+    const files = getDemoRecent(50).filter((f) => f.name.toLowerCase().includes(q));
+    return { projects, files } as T;
+  }
+
   const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
   if (projectMatch) {
     const project = getDemoProject(projectMatch[1]);
@@ -325,6 +335,12 @@ export const api = {
         body: JSON.stringify(body),
       }),
   },
+
+  search: (q: string, limit = 8) =>
+    request<{ projects: ProjectAPI[]; files: VideoFileAPI[] }>(
+      `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      { timeoutMs: 10_000 }
+    ),
 
   workspace: {
     summary: (recentLimit = 24) =>

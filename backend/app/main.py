@@ -10,6 +10,7 @@ from app.api.books import router as books_router
 from app.api.files import router as files_router
 from app.api.ops import router as ops_router
 from app.api.projects import router as projects_router
+from app.api.search import router as search_router
 from app.api.workspace import router as workspace_router
 from app.core.config import settings
 from app.core.database import engine
@@ -58,6 +59,7 @@ app.include_router(files_router)
 app.include_router(books_router)
 app.include_router(ops_router)
 app.include_router(workspace_router)
+app.include_router(search_router)
 
 
 @app.get(settings.route_prefix("/worker/poll-once"))

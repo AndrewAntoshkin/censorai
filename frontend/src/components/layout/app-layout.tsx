@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { UploadModal } from "@/components/upload/upload-modal";
+import { SearchModal } from "@/components/search/search-modal";
 import { countActiveUploadJobs, subscribeUploadJobs } from "@/lib/upload-jobs";
 import { cn } from "@/lib/utils";
 
@@ -18,15 +19,28 @@ const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export function AppLayout({ children, breadcrumb, splitScroll }: AppLayoutProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const activeUploads = useSyncExternalStore(
     subscribeUploadJobs,
     countActiveUploadJobs,
     () => 0
   );
 
+  // Global ⌘K / Ctrl+K to open search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="flex h-screen gap-0 bg-sidebar p-1.5">
-      <Sidebar />
+      <Sidebar onSearch={() => setSearchOpen(true)} />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         {DEMO_MODE && (
           <div className="border-b border-amber-500/20 bg-amber-500/10 px-6 py-2 text-center text-xs text-amber-950 dark:text-amber-100">
@@ -50,6 +64,7 @@ export function AppLayout({ children, breadcrumb, splitScroll }: AppLayoutProps)
         </main>
       </div>
       {!DEMO_MODE && <UploadModal open={uploadOpen} onOpenChange={setUploadOpen} />}
+      <SearchModal open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

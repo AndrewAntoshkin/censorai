@@ -29,7 +29,6 @@ const navItems = [
   { icon: Home, label: "Главная", href: "/" },
   { icon: FolderOpen, label: "Проекты", href: "/projects" },
   { icon: FileText, label: "Отчёты", href: "/reports" },
-  { icon: Search, label: "Поиск", href: "/search" },
 ];
 
 function Widget({
@@ -76,7 +75,7 @@ function profileInitials(name: string): string {
     .toUpperCase();
 }
 
-export function Sidebar() {
+export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const pathname = usePathname();
   const { user, loading: authLoading } = useAuth();
   const { projects, recentFiles, inProgressCount: backendInProgressCount } = useWorkspace();
@@ -141,22 +140,21 @@ export function Sidebar() {
       <OrgSwitcher />
 
       {/* Search field */}
-      <Link
-        href="/search"
-        className="mb-3 flex items-center gap-2 rounded-lg border border-transparent bg-sidebar-accent/60 px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent"
+      <button
+        type="button"
+        onClick={onSearch}
+        className="mb-3 flex w-full items-center gap-2 rounded-lg border border-transparent bg-sidebar-accent/60 px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent"
       >
         <Search className="h-4 w-4" />
         <span>Поиск</span>
         <kbd className="ml-auto rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           ⌘K
         </kbd>
-      </Link>
+      </button>
 
       {/* Primary nav */}
       <nav className="space-y-px">
-        {navItems
-          .filter((i) => i.href !== "/search")
-          .map((item) => {
+        {navItems.map((item) => {
             const isActive =
               item.href === "/"
                 ? pathname === "/"
