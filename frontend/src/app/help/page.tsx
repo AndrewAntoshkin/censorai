@@ -40,6 +40,52 @@ const sections = [
   },
 ];
 
+// Нормы, по которым сервис формирует категории рисков и подсказки.
+const laws = [
+  {
+    name: "436-ФЗ",
+    title: "О защите детей от информации, причиняющей вред их здоровью и развитию",
+    note: "Возрастные категории (0+ … 18+) и перечень вредной информации: насилие, наркотики, алкоголь, табак, нецензурная брань и др.",
+    url: "https://www.consultant.ru/document/cons_doc_LAW_108808/",
+  },
+  {
+    name: "149-ФЗ, ст. 10.5",
+    title: "Об информации, информационных технологиях и о защите информации",
+    note: "Обязанности аудиовизуального сервиса, в т.ч. возрастная маркировка контента.",
+    url: "https://www.consultant.ru/document/cons_doc_LAW_61798/",
+  },
+  {
+    name: "255-ФЗ",
+    title: "О контроле за деятельностью лиц, находящихся под иностранным влиянием",
+    note: "Требование о маркировке материалов иностранных агентов (ст. 9).",
+    url: "https://www.consultant.ru/document/cons_doc_LAW_421788/",
+  },
+  {
+    name: "114-ФЗ",
+    title: "О противодействии экстремистской деятельности",
+    note: "Запрещённая символика и сверка с перечнем экстремистских организаций.",
+    url: "https://www.consultant.ru/document/cons_doc_LAW_37867/",
+  },
+  {
+    name: "КоАП, ст. 6.21 / 6.21.2",
+    title: "Пропаганда нетрадиционных отношений, смены пола, отказа от деторождения",
+    note: "Признаки выявляются как триаж; окончательная оценка требует лингвистической экспертизы.",
+    url: "https://www.consultant.ru/document/cons_doc_LAW_34661/",
+  },
+];
+
+// Официальные реестры Минюста РФ для сверки распознанных лиц и организаций.
+const registries = [
+  {
+    name: "Реестр иностранных агентов (Минюст РФ)",
+    url: "https://minjust.gov.ru/ru/pages/reestr-inostryannykh-agentov/",
+  },
+  {
+    name: "Перечень экстремистских организаций (Минюст РФ)",
+    url: "https://minjust.gov.ru/ru/pages/extremist-organizations/",
+  },
+];
+
 export default function HelpPage() {
   return (
     <AppLayout breadcrumb={[{ label: "Справка" }]}>
@@ -59,6 +105,73 @@ export default function HelpPage() {
             </section>
           ))}
         </div>
+
+        <section className="rounded-xl border border-border p-5">
+          <h2 className="text-base font-medium text-foreground">
+            Законодательство, по которому идёт проверка
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Категории рисков и подсказки сервиса опираются на нормы российского
+            законодательства. Это ориентиры для редактора — ниже ссылки на сами
+            законы, чтобы при необходимости свериться с первоисточником.
+          </p>
+          <ul className="mt-4 space-y-3">
+            {laws.map((law) => (
+              <li key={law.name} className="text-sm">
+                <a
+                  href={law.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary hover:underline"
+                >
+                  {law.name}
+                </a>{" "}
+                <span className="text-foreground">— {law.title}.</span>
+                <span className="block text-muted-foreground">{law.note}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="rounded-xl border border-border p-5">
+          <h2 className="text-base font-medium text-foreground">
+            Реестры для сверки
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Распознанные в видео имена и организации сверяются с открытыми
+            реестрами Минюста РФ. Совпадение — это сигнал «проверить», а не
+            подтверждённый статус.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {registries.map((reg) => (
+              <li key={reg.name} className="text-sm">
+                <a
+                  href={reg.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  {reg.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+          <h2 className="text-base font-medium text-foreground">
+            Это не юридическое заключение
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Фреймчек проводит автоматический анализ и выдаёт рекомендации:
+            отмечает потенциально рискованные сцены, предлагает возрастной
+            рейтинг и указывает на нормы, которых стоит коснуться. Это не
+            официальный документ и не вердикт регулятора. Окончательное решение —
+            что вырезать, как промаркировать и допускать ли материал к показу —
+            принимает редактор или юрист, при необходимости с привлечением
+            экспертизы.
+          </p>
+        </section>
 
         <p className="text-sm text-muted-foreground">
           Нужна помощь с доступом или кодом организации?{" "}
