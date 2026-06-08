@@ -26,7 +26,7 @@ class SearchResponse(BaseModel):
 @router.get("", response_model=SearchResponse)
 async def search(
     q: str = Query(..., min_length=1, max_length=200),
-    limit: int = Query(8, ge=1, le=25),
+    limit: int = Query(8, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):

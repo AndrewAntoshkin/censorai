@@ -38,7 +38,7 @@ export default function HomePage() {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const res = await api.search(trimmedQuery, 50);
+        const res = await api.search(trimmedQuery, 25);
         if (controller.signal.aborted) return;
         setSearchProjects(res.projects ?? []);
         setSearchFiles(res.files ?? []);
