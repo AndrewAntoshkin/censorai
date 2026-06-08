@@ -120,25 +120,29 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       !j.fileId
   ).length;
   const activeReportsCount = backendInProgressCount + localPreRegisterCount;
+  const isSuperAdmin = user?.role === "super_admin";
 
   return (
     <aside className="flex h-full w-60 min-w-60 flex-col px-2 pb-1 pt-1.5 text-sidebar-foreground">
-      {/* Space switcher */}
+      {/* Logo / org switcher (super admin) */}
       <div className="mb-2 flex items-center gap-1 px-1">
-        <Link
-          href="/"
-          className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-sidebar-accent"
-        >
-          <Image
-            src="/logo.png"
-            alt="фреймчек"
-            width={92}
-            height={19}
-            priority
-            className="shrink-0"
-          />
-          <ChevronsUpDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-        </Link>
+        {isSuperAdmin ? (
+          <OrgSwitcher />
+        ) : (
+          <Link
+            href="/"
+            className="flex min-w-0 flex-1 items-center rounded-lg px-1.5 py-1.5 transition-colors hover:bg-sidebar-accent"
+          >
+            <Image
+              src="/logo.png"
+              alt="фреймчек"
+              width={92}
+              height={19}
+              priority
+              className="shrink-0"
+            />
+          </Link>
+        )}
         <Link
           href="/settings"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
@@ -147,8 +151,6 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <Settings className="h-4 w-4" />
         </Link>
       </div>
-
-      <OrgSwitcher />
 
       {/* Search field */}
       <button
