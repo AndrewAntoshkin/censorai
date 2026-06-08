@@ -1,21 +1,92 @@
 "use client";
 
 import { AppLayout } from "@/components/layout/app-layout";
-import { Search, Folder, LayoutGrid, List } from "lucide-react";
+import { Search, Folder, LayoutGrid, List, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ReportsList } from "@/components/reports/reports-list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { api, type ProjectAPI, type VideoFileAPI } from "@/lib/api";
+
+const SEARCH_DEBOUNCE_MS = 180;
 
 export default function HomePage() {
   const { projects, recentFiles, loading, error } = useWorkspace();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [activeTab, setActiveTab] = useState<"projects" | "reports">("projects");
+  const [query, setQuery] = useState("");
+  const [searchProjects, setSearchProjects] = useState<ProjectAPI[]>([]);
+  const [searchFiles, setSearchFiles] = useState<VideoFileAPI[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const recent = recentFiles;
+  const trimmedQuery = query.trim();
+  const isSearching = trimmedQuery.length > 0;
+
+  useEffect(() => {
+    if (!trimmedQuery) {
+      setSearchProjects([]);
+      setSearchFiles([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await api.search(trimmedQuery, 50);
+        if (controller.signal.aborted) return;
+        setSearchProjects(res.projects ?? []);
+        setSearchFiles(res.files ?? []);
+      } catch {
+        if (!controller.signal.aborted) {
+          setSearchProjects([]);
+          setSearchFiles([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setSearchLoading(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [trimmedQuery]);
+
+  const displayProjects = useMemo(
+    () => (isSearching ? searchProjects : projects),
+    [isSearching, searchProjects, projects]
+  );
+
+  const analyzedRecent = useMemo(
+    () => recent.filter((f) => (f.status || "").toLowerCase() === "analyzed"),
+    [recent]
+  );
+
+  const displayReports = useMemo(
+    () =>
+      isSearching
+        ? searchFiles.filter((f) => (f.status || "").toLowerCase() === "analyzed")
+        : analyzedRecent,
+    [isSearching, searchFiles, analyzedRecent]
+  );
+
+  const displayRecent = useMemo(
+    () => (isSearching ? searchFiles : recent),
+    [isSearching, searchFiles, recent]
+  );
+
+  const showEmptySearch =
+    isSearching &&
+    !searchLoading &&
+    (activeTab === "reports"
+      ? displayReports.length === 0
+      : displayProjects.length === 0 && displayRecent.length === 0);
 
   return (
     <AppLayout breadcrumb={[{ label: "Главная" }]}>
@@ -29,12 +100,18 @@ export default function HomePage() {
           </p>
         </div>
 
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative w-full">
+          {searchLoading ? (
+            <Loader2 className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+          ) : (
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          )}
           <Input
-            placeholder="Поиск по файлам и проектам"
-            className="pl-9"
-            disabled={loading}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск по проектам и отчётам"
+            className="h-14 rounded-xl pl-11 text-sm"
+            disabled={loading && !query}
           />
         </div>
 
@@ -97,7 +174,13 @@ export default function HomePage() {
           )}
         </div>
 
-        {loading && projects.length === 0 ? (
+        {showEmptySearch ? (
+          <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              Ничего не найдено по «{trimmedQuery}»
+            </p>
+          </div>
+        ) : loading && projects.length === 0 && !isSearching ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-28 rounded-xl" />
@@ -105,22 +188,31 @@ export default function HomePage() {
           </div>
         ) : activeTab === "reports" ? (
           <ReportsList
-            files={recent.filter(
-              (f) => (f.status || "").toLowerCase() === "analyzed"
-            )}
+            files={displayReports}
+            emptyMessage={
+              isSearching
+                ? `Нет отчётов по запросу «${trimmedQuery}»`
+                : "Пока нет готовых отчётов"
+            }
           />
-        ) : projects.length === 0 ? (
+        ) : displayProjects.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center">
             <p className="text-sm text-muted-foreground">
-              Пока нет проектов.{" "}
-              <Link href="/projects" className="text-primary hover:underline">
-                Создать проект
-              </Link>
+              {isSearching
+                ? `Нет проектов по запросу «${trimmedQuery}»`
+                : (
+                  <>
+                    Пока нет проектов.{" "}
+                    <Link href="/projects" className="text-primary hover:underline">
+                      Создать проект
+                    </Link>
+                  </>
+                  )}
             </p>
           </div>
         ) : viewMode === "grid" ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
+            {displayProjects.map((project) => (
               <Link
                 key={project.id}
                 href={`/project/${project.id}`}
@@ -136,7 +228,7 @@ export default function HomePage() {
           </div>
         ) : (
           <ul className="divide-y divide-border rounded-xl border border-border">
-            {projects.map((project) => (
+            {displayProjects.map((project) => (
               <li key={project.id}>
                 <Link
                   href={`/project/${project.id}`}
@@ -153,11 +245,13 @@ export default function HomePage() {
           </ul>
         )}
 
-        {!loading && activeTab === "projects" && recent.length > 0 && (
+        {!loading && activeTab === "projects" && displayRecent.length > 0 && (
           <div>
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">Недавние файлы</h2>
+            <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+              {isSearching ? "Найденные отчёты" : "Недавние файлы"}
+            </h2>
             <ul className="space-y-1">
-              {recent.slice(0, 6).map((file) => (
+              {(isSearching ? displayRecent : displayRecent.slice(0, 6)).map((file) => (
                 <li key={file.id}>
                   <Link
                     href={`/file/${file.id}`}
