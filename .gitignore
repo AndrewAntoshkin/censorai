@@ -1,9 +1,14 @@
 # Env & secrets
 .env
+.env.*
 backend/.env
 backend/.env.secrets
 backend/.env.vercel-pull
+backend/.env.vercel.prod
 *.pem
+# Customer access/credentials docs
+Доступы*.docx
+*Доступы*.docx
 
 # Python
 __pycache__/
