@@ -164,14 +164,32 @@ export async function waitForAnalysis(
   }
 
   const deadline = Date.now() + 60 * 60 * 1000;
+  // Long videos are analyzed segment-by-segment; a status poll can land on a
+  // request that runs a heavy segment and times out (5xx), or the network can
+  // blip. The analysis keeps running server-side and the global driver advances
+  // it, so transient errors must NOT abort tracking — only give up after many
+  // consecutive failures.
+  const MAX_CONSECUTIVE_ERRORS = 40;
+  let consecutiveErrors = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
-    const statusRes = await apiFetch(`${getApiBase()}/api/files/${fileId}`);
-    if (statusRes.status >= 500) {
-      throw new Error("Ошибка сервера при проверке статуса анализа");
+    let fileState: { status?: string; progress?: number };
+    try {
+      const statusRes = await apiFetch(`${getApiBase()}/api/files/${fileId}`);
+      if (!statusRes.ok) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          throw new Error("Сервер не отвечает при проверке статуса анализа");
+        }
+        continue;
+      }
+      consecutiveErrors = 0;
+      fileState = await statusRes.json();
+    } catch (err) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw err;
+      continue;
     }
-    if (!statusRes.ok) continue;
-    const fileState = await statusRes.json();
     if (fileState.status === "analyzed") return;
     if (fileState.status === "error") {
       throw new Error("Analysis failed on server");
