@@ -177,6 +177,156 @@ class GeminiService:
         encoded = base64.b64encode(raw).decode("ascii")
         return f"data:{content_type};base64,{encoded}"
 
+    def _build_analysis_prompt(
+        self,
+        *,
+        expected_duration_seconds: int | None = None,
+        extra_prompt_suffix: str = "",
+    ) -> str:
+        return (
+            ANALYSIS_PROMPT
+            + full_coverage_prompt_suffix(expected_duration_seconds)
+            + (extra_prompt_suffix or "")
+        )
+
+    def analyze_video_direct(
+        self,
+        storage_path: str,
+        *,
+        file_id: str | None = None,
+        file_size: int | None = None,
+        expected_duration_seconds: int | None = None,
+        extra_prompt_suffix: str = "",
+        model_name: str | None = None,
+        prompt_override: str | None = None,
+    ) -> GeminiAnalysisResult:
+        """Run analysis via Google AI Studio (bypasses Replicate)."""
+        import google.generativeai as genai
+
+        api_key = settings.GEMINI_API_KEY.strip()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+
+        genai.configure(api_key=api_key)
+        model_slug = (model_name or settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        prompt = (prompt_override or "").strip() or self._build_analysis_prompt(
+            expected_duration_seconds=expected_duration_seconds,
+            extra_prompt_suffix=extra_prompt_suffix,
+        )
+
+        video_uri = self.resolve_video_uri(
+            storage_path, file_id=file_id, file_size=file_size
+        )
+        if video_uri.startswith("data:"):
+            import tempfile
+            from pathlib import Path
+
+            header, encoded = video_uri.split(",", 1)
+            mime = header.split(":")[1].split(";")[0]
+            tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'inline'}.mp4"
+            tmp.write_bytes(base64.b64decode(encoded))
+            try:
+                return self._direct_generate_from_path(str(tmp), prompt, model_slug, mime=mime)
+            finally:
+                tmp.unlink(missing_ok=True)
+
+        if video_uri.startswith(("http://", "https://")):
+            import tempfile
+            from pathlib import Path
+
+            with httpx.Client(
+                timeout=httpx.Timeout(600.0, connect=60.0), follow_redirects=True
+            ) as client:
+                resp = client.get(video_uri)
+                resp.raise_for_status()
+                content_type = (
+                    resp.headers.get("content-type", "").split(";")[0].strip()
+                    or "video/mp4"
+                )
+                tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'remote'}.mp4"
+                tmp.write_bytes(resp.content)
+            try:
+                return self._direct_generate_from_path(
+                    str(tmp), prompt, model_slug, mime=content_type
+                )
+            finally:
+                tmp.unlink(missing_ok=True)
+
+        return self._direct_generate_from_path(video_uri, prompt, model_slug)
+
+    def analyze_local_file_direct(
+        self,
+        local_path: str,
+        *,
+        expected_duration_seconds: int | None = None,
+        extra_prompt_suffix: str = "",
+        model_name: str | None = None,
+    ) -> GeminiAnalysisResult:
+        """Run direct Gemini on an already-local file (e.g. a cut segment).
+
+        Unlike ``analyze_video_direct`` this never goes through
+        ``resolve_video_uri`` — the path is uploaded to Gemini as-is, so it is
+        safe for segment temp files that are larger than the inline limit.
+        """
+        if not settings.GEMINI_API_KEY.strip():
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        import google.generativeai as genai
+
+        genai.configure(api_key=settings.GEMINI_API_KEY.strip())
+        model_slug = (model_name or settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        prompt = self._build_analysis_prompt(
+            expected_duration_seconds=expected_duration_seconds,
+            extra_prompt_suffix=extra_prompt_suffix,
+        )
+        mime = mimetypes.guess_type(local_path)[0] or "video/mp4"
+        return self._direct_generate_from_path(local_path, prompt, model_slug, mime=mime)
+
+    def _direct_generate_from_path(
+        self,
+        local_path: str,
+        prompt: str,
+        model_slug: str,
+        *,
+        mime: str | None = None,
+    ) -> GeminiAnalysisResult:
+        import google.generativeai as genai
+
+        if mime:
+            uploaded = genai.upload_file(local_path, mime_type=mime)
+        else:
+            uploaded = genai.upload_file(local_path)
+        try:
+            deadline = time.time() + 600
+            while uploaded.state.name == "PROCESSING":
+                if time.time() > deadline:
+                    raise TimeoutError("Gemini file processing timed out")
+                time.sleep(3)
+                uploaded = genai.get_file(uploaded.name)
+
+            if uploaded.state.name != "ACTIVE":
+                raise RuntimeError(f"Gemini file state: {uploaded.state.name}")
+
+            model = genai.GenerativeModel(model_slug)
+            response = model.generate_content(
+                [uploaded, prompt],
+                generation_config=genai.GenerationConfig(
+                    temperature=0.2,
+                    max_output_tokens=min(FULL_ANALYSIS_MAX_OUTPUT_TOKENS, 65535),
+                    response_mime_type="application/json",
+                ),
+                request_options={"timeout": 600},
+            )
+            raw = (response.text or "").strip()
+            if not raw:
+                raise RuntimeError("Empty response from direct Gemini API")
+            logger.info("Direct Gemini response (%d chars)", len(raw))
+            return self._parse_response(raw)
+        finally:
+            try:
+                genai.delete_file(uploaded.name)
+            except Exception:
+                logger.debug("Failed to delete Gemini uploaded file", exc_info=True)
+
     def _model_input(
         self,
         video_url: str,
@@ -184,10 +334,9 @@ class GeminiService:
         expected_duration_seconds: int | None = None,
         extra_prompt_suffix: str = "",
     ) -> dict:
-        prompt = (
-            ANALYSIS_PROMPT
-            + full_coverage_prompt_suffix(expected_duration_seconds)
-            + (extra_prompt_suffix or "")
+        prompt = self._build_analysis_prompt(
+            expected_duration_seconds=expected_duration_seconds,
+            extra_prompt_suffix=extra_prompt_suffix,
         )
         payload = {
             "prompt": prompt,

@@ -54,7 +54,15 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "censorai"
 
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-pro-preview-05-06"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    # "direct_gemini" (Google AI Studio, bypasses Replicate) or "replicate".
+    # Replicate Gemini currently fails uploads with E001, so direct is the default.
+    ANALYSIS_PRIMARY_PROVIDER: str = "direct_gemini"
+    # Direct Gemini runs one segment per serverless invocation (≤300s on Vercel).
+    # Long videos are cut into chunks of this size so each generate_content call
+    # stays under the time limit and produces a JSON small enough to not truncate.
+    GEMINI_DIRECT_SEGMENT_SECONDS: int = 600
 
     REPLICATE_API_TOKEN: str = ""
     REPLICATE_MODEL: str = "google/gemini-3.5-flash"

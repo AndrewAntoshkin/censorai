@@ -9,11 +9,278 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_factory
 from app.models.project import VideoFile
 from app.schemas.analysis import GeminiAnalysisResult
+from app.services.direct_gemini_fallback import (
+    DIRECT_PREDICTION_PENDING,
+    DIRECT_SEGMENTED_KEY,
+    direct_prediction_running_marker,
+    direct_running_is_stale,
+    is_direct_prediction_id,
+    is_direct_running,
+    run_direct_segment_sync,
+    schedule_direct_gemini_fallback,
+    should_use_direct_gemini_fallback,
+)
 from app.services.video_analysis_provider import poll_prediction
 
 logger = logging.getLogger(__name__)
+
+
+async def maybe_finish_direct_gemini(
+    video: VideoFile,
+    db: AsyncSession,
+    *,
+    save_result,
+) -> bool:
+    """Drive direct Gemini analysis (single or segmented). Returns True if handled."""
+    pred = video.replicate_prediction_id or ""
+    if not is_direct_prediction_id(pred):
+        return False
+
+    file_id = video.id
+    if video.status != "analyzing":
+        return True
+
+    if is_direct_running(pred):
+        # A sibling invocation is processing a segment. Reschedule only if it
+        # has clearly died (stale), otherwise just nudge progress.
+        if direct_running_is_stale(pred):
+            await _reset_direct_to_pending(file_id, db, reason="stale direct:running")
+        else:
+            await _bump_progress(file_id, db)
+        return True
+
+    if pred != DIRECT_PREDICTION_PENDING:
+        await _reset_direct_to_pending(file_id, db, reason=f"unknown marker {pred}")
+        return True
+
+    # Claim in a fresh, short-lived session, then release the request's own
+    # connection. The Gemini call below blocks for 150-200s; Neon drops idle
+    # serverless connections, so we must NOT hold any connection across it.
+    claim = await _claim_direct_step(file_id)
+    if claim is None:
+        return True
+    running_marker, storage_path, file_size, duration_seconds, metadata = claim
+
+    # Release the request's connection (Neon drops it if held idle during the
+    # 150-200s Gemini call). commit() keeps `video` attached for the caller.
+    try:
+        await db.commit()
+    except Exception:
+        logger.debug("Failed to commit request session before direct work", exc_info=True)
+
+    if not storage_path:
+        await _fail_direct_gemini_fresh(file_id, "File has no storage path")
+        return True
+
+    if metadata.get(DIRECT_SEGMENTED_KEY):
+        await _run_direct_segment(
+            file_id, running_marker, metadata, save_result=save_result
+        )
+    else:
+        await _run_direct_single(
+            file_id,
+            running_marker,
+            storage_path,
+            file_size,
+            duration_seconds,
+            save_result=save_result,
+        )
+    return True
+
+
+async def _claim_direct_step(
+    file_id: str,
+) -> tuple[str, str | None, int | None, float | None, dict] | None:
+    """Flip pending -> running under a lock; return work params + job metadata."""
+    from app.services.analysis_jobs import get_job_metadata
+
+    async with async_session_factory() as s:
+        row = await s.execute(
+            select(VideoFile)
+            .where(VideoFile.id == file_id)
+            .with_for_update(skip_locked=True)
+        )
+        locked = row.scalar_one_or_none()
+        if not locked or locked.status != "analyzing":
+            return None
+        if locked.replicate_prediction_id != DIRECT_PREDICTION_PENDING:
+            return None
+        running_marker = direct_prediction_running_marker()
+        locked.replicate_prediction_id = running_marker
+        storage_path = locked.storage_path
+        file_size = locked.size
+        duration_seconds = locked.duration_seconds
+        await s.flush()
+        metadata = await get_job_metadata(s, file_id)
+        await s.commit()
+    return running_marker, storage_path, file_size, duration_seconds, metadata
+
+
+async def _run_direct_single(
+    file_id: str,
+    running_marker: str,
+    storage_path: str,
+    file_size: int | None,
+    duration_seconds: float | None,
+    *,
+    save_result,
+) -> None:
+    from app.services.analysis_coverage import expected_duration_seconds
+    from app.services.gemini_service import gemini_service
+
+    try:
+        result = await asyncio.to_thread(
+            gemini_service.analyze_video_direct,
+            storage_path,
+            file_id=file_id,
+            file_size=file_size,
+            expected_duration_seconds=expected_duration_seconds(
+                file_size or 0, duration_seconds
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Direct Gemini failed for file %s", file_id)
+        await _fail_direct_gemini_fresh(file_id, f"Direct Gemini: {exc}")
+        return
+
+    async with async_session_factory() as s:
+        await _persist_result(file_id, running_marker, result, s, save_result=save_result)
+        await s.commit()
+
+
+async def _run_direct_segment(
+    file_id: str,
+    running_marker: str,
+    metadata: dict,
+    *,
+    save_result,
+) -> None:
+    from app.services.analysis_jobs import get_job_metadata, set_job_metadata
+    from app.services.segmented_analysis import merge_segment_results
+
+    ranges = metadata.get("ranges") or []
+    total = len(ranges)
+    idx = int(metadata.get("current_index") or 0)
+    if idx >= total:
+        await _fail_direct_gemini_fresh(file_id, "Segment index out of range")
+        return
+
+    range_row = ranges[idx]
+    source_path = metadata.get("source_path") or ""
+
+    try:
+        result = await asyncio.to_thread(
+            run_direct_segment_sync,
+            source_path,
+            int(range_row["start_sec"]),
+            int(range_row["duration_sec"]),
+            file_id=file_id,
+            index=idx,
+            total=total,
+            extra_prompt_suffix=metadata.get("extra_prompt_suffix", ""),
+        )
+    except Exception as exc:
+        logger.exception(
+            "Direct Gemini segment %d/%d failed for file %s", idx + 1, total, file_id
+        )
+        await _fail_direct_gemini_fresh(
+            file_id, f"Direct Gemini segment {idx + 1}/{total}: {exc}"
+        )
+        return
+
+    # Re-lock in a fresh session and record the partial; advance or merge+save.
+    async with async_session_factory() as s:
+        row = await s.execute(
+            select(VideoFile)
+            .where(VideoFile.id == file_id)
+            .with_for_update(skip_locked=True)
+        )
+        locked = row.scalar_one_or_none()
+        if not locked or locked.status != "analyzing":
+            return
+        if locked.replicate_prediction_id != running_marker:
+            return
+
+        meta = await get_job_metadata(s, file_id) or metadata
+        partial = list(meta.get("partial_results") or [])
+        partial.append(result.model_dump())
+        meta["partial_results"] = partial
+
+        if idx + 1 < total:
+            meta["current_index"] = idx + 1
+            await set_job_metadata(s, file_id, meta)
+            locked.replicate_prediction_id = DIRECT_PREDICTION_PENDING
+            locked.progress = min(94, 30 + int(((idx + 1) / total) * 60))
+            await s.flush()
+            await s.commit()
+            logger.info(
+                "Direct Gemini: file %s segment %d/%d done, next part queued",
+                file_id,
+                idx + 1,
+                total,
+            )
+            return
+
+        logger.info(
+            "Direct Gemini: file %s all %d segments done, merging", file_id, total
+        )
+        merged = merge_segment_results(
+            partial,
+            ranges,
+            int(meta.get("total_duration_sec") or 0),
+            locked.name,
+        )
+        meta.pop(DIRECT_SEGMENTED_KEY, None)
+        await set_job_metadata(s, file_id, meta)
+        await _persist_result(file_id, running_marker, merged, s, save_result=save_result)
+        await s.commit()
+
+
+async def _fail_direct_gemini_fresh(file_id: str, message: str) -> None:
+    async with async_session_factory() as s:
+        await _fail_direct_gemini(file_id, s, message)
+        await s.commit()
+
+
+async def _reset_direct_to_pending(
+    file_id: str, db: AsyncSession, *, reason: str
+) -> None:
+    row = await db.execute(
+        select(VideoFile)
+        .where(VideoFile.id == file_id)
+        .with_for_update(skip_locked=True)
+    )
+    locked = row.scalar_one_or_none()
+    if not locked or locked.status != "analyzing":
+        return
+    logger.warning("Resetting direct Gemini for %s to pending (%s)", file_id, reason)
+    locked.replicate_prediction_id = DIRECT_PREDICTION_PENDING
+    await db.flush()
+
+
+async def _fail_direct_gemini(
+    file_id: str,
+    db: AsyncSession,
+    message: str,
+) -> None:
+    row = await db.execute(
+        select(VideoFile)
+        .where(VideoFile.id == file_id)
+        .with_for_update(skip_locked=True)
+    )
+    locked = row.scalar_one_or_none()
+    if not locked or locked.status != "analyzing":
+        return
+    logger.error("Direct Gemini fallback failed for %s: %s", file_id, message[:300])
+    locked.status = "error"
+    locked.replicate_prediction_id = None
+    await db.flush()
+    from app.services.analysis_jobs import mark_job_failed
+
+    await mark_job_failed(db, file_id, message)
 
 
 async def maybe_finish_analysis(
@@ -28,6 +295,8 @@ async def maybe_finish_analysis(
   analysis_id on success (see files._save_analysis_result).
     """
     if video.status != "analyzing" or not video.replicate_prediction_id:
+        return
+    if is_direct_prediction_id(video.replicate_prediction_id):
         return
 
     prediction_id = video.replicate_prediction_id
@@ -149,6 +418,15 @@ async def _handle_poll_error(
                     return
                 except Exception:
                     logger.exception("Retry failed for file %s", file_id)
+
+    if should_use_direct_gemini_fallback(exc):
+        scheduled = await schedule_direct_gemini_fallback(
+            db,
+            file_id,
+            reason=str(exc),
+        )
+        if scheduled:
+            return
 
     row = await db.execute(
         select(VideoFile)

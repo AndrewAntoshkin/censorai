@@ -24,47 +24,58 @@ MIN_TAIL_SECONDS = 3 * 60
 SHORT_OVERFLOW_FIRST_SECONDS = MAX_SEGMENT_SECONDS - 5 * 60
 
 
-def needs_segmentation(total_seconds: int) -> bool:
-    return total_seconds > MAX_SEGMENT_SECONDS
+def _segment_params(max_segment_seconds: int) -> tuple[int, int, int]:
+    """Return (max_seg, min_tail, short_overflow_first) for a given chunk size."""
+    max_seg = max_segment_seconds if max_segment_seconds > 0 else MAX_SEGMENT_SECONDS
+    min_tail = MIN_TAIL_SECONDS if max_seg >= 2 * MIN_TAIL_SECONDS else max(30, max_seg // 4)
+    short_first = max(max_seg - 5 * 60, max_seg * 3 // 4)
+    return max_seg, min_tail, short_first
 
 
-def plan_segment_ranges(total_seconds: int) -> list[tuple[int, int]]:
-    """Return (start_sec, duration_sec) slices for the full file.
+def needs_segmentation(
+    total_seconds: int, max_segment_seconds: int = MAX_SEGMENT_SECONDS
+) -> bool:
+    max_seg, _, _ = _segment_params(max_segment_seconds)
+    return total_seconds > max_seg
 
-    Rules (demo / Replicate):
-    - <= 45 min: one segment.
-    - 45 min < total <= 48 min: 40 min + remainder (target ~8 min).
-    - Otherwise: 45 min chunks; if the tail after a 45 min head would be < 3 min,
-      use 40 + remainder from that position instead of 45 + tiny tail.
+
+def plan_segment_ranges(
+    total_seconds: int, max_segment_seconds: int = MAX_SEGMENT_SECONDS
+) -> list[tuple[int, int]]:
+    """Return (start_sec, duration_sec) slices covering the full file.
+
+    Chunks are ``max_segment_seconds`` long. If the tail after a full chunk
+    would be shorter than the minimum tail, the preceding chunk is shortened so
+    the tail is reasonably sized instead of tiny.
     """
+    max_seg, min_tail, short_first = _segment_params(max_segment_seconds)
+
     if total_seconds <= 0:
         return [(0, 0)]
 
-    if total_seconds <= MAX_SEGMENT_SECONDS:
+    if total_seconds <= max_seg:
         return [(0, total_seconds)]
 
-    if total_seconds <= MAX_SEGMENT_SECONDS + MIN_TAIL_SECONDS:
-        first = SHORT_OVERFLOW_FIRST_SECONDS
-        return [(0, first), (first, total_seconds - first)]
+    if total_seconds <= max_seg + min_tail:
+        return [(0, short_first), (short_first, total_seconds - short_first)]
 
     segments: list[tuple[int, int]] = []
     pos = 0
     while True:
         remaining = total_seconds - pos
-        if remaining <= MAX_SEGMENT_SECONDS:
+        if remaining <= max_seg:
             if remaining > 0:
                 segments.append((pos, remaining))
             break
 
-        next_remaining = remaining - MAX_SEGMENT_SECONDS
-        if 0 < next_remaining < MIN_TAIL_SECONDS:
-            first = SHORT_OVERFLOW_FIRST_SECONDS
-            segments.append((pos, first))
-            segments.append((pos + first, total_seconds - pos - first))
+        next_remaining = remaining - max_seg
+        if 0 < next_remaining < min_tail:
+            segments.append((pos, short_first))
+            segments.append((pos + short_first, total_seconds - pos - short_first))
             break
 
-        segments.append((pos, MAX_SEGMENT_SECONDS))
-        pos += MAX_SEGMENT_SECONDS
+        segments.append((pos, max_seg))
+        pos += max_seg
 
     return segments
 

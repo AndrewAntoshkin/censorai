@@ -3,6 +3,7 @@ import json
 import logging
 import mimetypes
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,7 +45,12 @@ from app.services.analysis_coverage import (
     expected_duration_seconds,
     is_incomplete_coverage,
 )
-from app.services.analysis_finish import maybe_finish_analysis
+from app.services.analysis_finish import maybe_finish_analysis, maybe_finish_direct_gemini
+from app.services.direct_gemini_fallback import (
+    DIRECT_PREDICTION_PENDING,
+    schedule_direct_gemini_fallback,
+    should_use_direct_gemini_fallback,
+)
 from app.services.gemini_service import gemini_service
 from app.services.replicate_media import verify_replicate_media_signature
 from app.services.object_storage import build_object_key
@@ -127,15 +133,21 @@ async def _restart_full_analysis(video: VideoFile, db: AsyncSession) -> None:
 async def _kickoff_analysis(
     video: VideoFile, db: AsyncSession, *, from_queue: bool = False
 ) -> None:
-    """Queue job, then start non-blocking Replicate prediction."""
+    """Queue job, then start analysis (direct Gemini primary, Replicate fallback)."""
     from app.services.analysis_jobs import (
         ensure_processing_job,
         ensure_queued_job,
         mark_job_failed,
     )
+    from app.services.direct_gemini_fallback import (
+        direct_gemini_is_primary,
+        setup_direct_analysis,
+    )
     from app.services.video_analysis_provider import start_analysis
 
-    if not settings.REPLICATE_API_TOKEN.strip():
+    use_direct = direct_gemini_is_primary()
+
+    if not use_direct and not settings.REPLICATE_API_TOKEN.strip():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -169,9 +181,25 @@ async def _kickoff_analysis(
 
     from app.services.segmented_analysis import (
         prepare_segmented_job,
+        resolve_duration_seconds,
         should_segment,
         start_segment_prediction,
     )
+
+    if use_direct:
+        from app.services.analysis_coverage import estimate_duration_seconds
+
+        total_seconds = await resolve_duration_seconds(video)
+        if not total_seconds and video.size:
+            total_seconds = estimate_duration_seconds(int(video.size))
+        if total_seconds and (not video.duration_seconds or video.duration_seconds < 30):
+            video.duration_seconds = float(total_seconds)
+            await db.flush()
+        await setup_direct_analysis(
+            db, video, total_seconds=total_seconds, extra_prompt_suffix=""
+        )
+        await ensure_processing_job(db, video.id)
+        return
 
     do_segment, total_seconds = await should_segment(video)
     if total_seconds and (not video.duration_seconds or video.duration_seconds < 30):
@@ -202,6 +230,17 @@ async def _kickoff_analysis(
     except HTTPException:
         raise
     except Exception as exc:
+        if should_use_direct_gemini_fallback(exc):
+            logger.warning(
+                "Replicate start failed for %s; scheduling direct Gemini fallback",
+                video.id,
+            )
+            video.status = "analyzing"
+            video.replicate_prediction_id = DIRECT_PREDICTION_PENDING
+            video.progress = 30
+            await ensure_processing_job(db, video.id)
+            await db.flush()
+            return
         logger.exception("Failed to start analysis for file %s", video.id)
         video.status = "error"
         video.replicate_prediction_id = None
@@ -221,11 +260,10 @@ def _utc_naive_now() -> datetime:
 
 
 async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
+    if await maybe_finish_direct_gemini(video, db, save_result=_save_analysis_result):
+        return
+
     pred = video.replicate_prediction_id or ""
-    if pred.startswith("direct:"):
-        video.replicate_prediction_id = None
-        await db.flush()
-        pred = ""
     if (
         video.status == "analyzing"
         and not pred
@@ -413,6 +451,340 @@ async def init_chunk_upload(
         chunk_size=chunk_size_bytes(),
         total_parts=session.total_parts,
     )
+
+
+@router.post("/debug-job")
+async def debug_analysis_job(request: Request, db: AsyncSession = Depends(get_db)):
+    """Ops helper: read analysis_jobs.last_error (requires shared secret)."""
+    from app.models.analysis_job import AnalysisJob
+
+    payload = await request.json()
+    if payload.get("secret") != "censor-demo-2026":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    if payload.get("direct_gemini"):
+        from app.services.gemini_service import gemini_service
+
+        file_id = (payload.get("file_id") or "").strip()
+        if not file_id:
+            raise HTTPException(status_code=400, detail="file_id required")
+        result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = result.scalar_one_or_none()
+        if not video or not video.storage_path:
+            raise HTTPException(status_code=404, detail=f"file {file_id} not found or no storage")
+        prompt = (payload.get("prompt") or "").strip() or None
+        model_name = (payload.get("model") or "").strip() or None
+        if not settings.GEMINI_API_KEY.strip():
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY missing on server")
+        try:
+            analysis = await asyncio.to_thread(
+                gemini_service.analyze_video_direct,
+                video.storage_path,
+                file_id=video.id,
+                file_size=video.size,
+                expected_duration_seconds=int(video.duration_seconds or 0) or None,
+                model_name=model_name,
+                prompt_override=prompt,
+            )
+            data = analysis.model_dump()
+            return {
+                "file_id": file_id,
+                "model": model_name or settings.GEMINI_MODEL,
+                "status": "succeeded",
+                "scenes": len(data.get("scenes") or []),
+                "recommended_age_rating": data.get("recommended_age_rating"),
+                "video_title": data.get("video_title"),
+                "output_preview": json.dumps(data, ensure_ascii=False)[:4000],
+            }
+        except Exception as exc:
+            return {
+                "file_id": file_id,
+                "model": model_name or settings.GEMINI_MODEL,
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}"[:2000],
+            }
+
+    if payload.get("schedule_direct_gemini"):
+        file_id = (payload.get("file_id") or "").strip()
+        if not file_id:
+            raise HTTPException(status_code=400, detail="file_id required")
+        if not settings.GEMINI_API_KEY.strip():
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY missing on server")
+        result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = result.scalar_one_or_none()
+        if not video or not video.storage_path:
+            raise HTTPException(status_code=404, detail=f"file {file_id} not found or no storage")
+
+        # Run the real kickoff so long videos get a segmentation plan.
+        video.status = "analyzing"
+        video.progress = 10
+        video.analysis_id = None
+        video.replicate_prediction_id = None
+        video.analysis_attempts = 0
+        await db.flush()
+        await _kickoff_analysis(video, db)
+        from app.services.analysis_jobs import get_job_metadata
+
+        metadata = await get_job_metadata(db, file_id)
+        return {
+            "file_id": file_id,
+            "status": "scheduled",
+            "prediction_id": video.replicate_prediction_id,
+            "segmented": bool(metadata.get("direct_segmented")),
+            "segments": len(metadata.get("ranges") or []),
+            "duration_seconds": video.duration_seconds,
+        }
+
+    if payload.get("poll_direct"):
+        file_id = (payload.get("file_id") or "").strip()
+        if not file_id:
+            raise HTTPException(status_code=400, detail="file_id required")
+        result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = result.scalar_one_or_none()
+        if not video:
+            raise HTTPException(status_code=404, detail=f"file {file_id} not found")
+        await _maybe_finish_analysis(video, db)
+        from app.services.analysis_jobs import get_job_metadata
+
+        refreshed = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = refreshed.scalar_one_or_none() or video
+        metadata = await get_job_metadata(db, file_id)
+        return {
+            "file_id": file_id,
+            "status": video.status,
+            "progress": video.progress,
+            "prediction_id": video.replicate_prediction_id,
+            "analysis_id": video.analysis_id,
+            "current_index": metadata.get("current_index"),
+            "segments": len(metadata.get("ranges") or []),
+            "partials": len(metadata.get("partial_results") or []),
+        }
+
+    if payload.get("models"):
+        import replicate as _replicate
+
+        models = payload.get("models")
+        if isinstance(models, str):
+            models = [m.strip() for m in models.split(",") if m.strip()]
+        if not models:
+            raise HTTPException(status_code=400, detail="models list required")
+
+        video_url = (payload.get("video_url") or "").strip()
+        file_id = (payload.get("file_id") or "").strip()
+        if not video_url and file_id:
+            result = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+            video = result.scalar_one_or_none()
+            if not video or not video.storage_path:
+                raise HTTPException(status_code=404, detail=f"file {file_id} not found or no storage")
+            storage = video.storage_path
+            if storage.startswith("s3://"):
+                from app.services.object_storage import presigned_get_url
+
+                video_url = presigned_get_url(storage)
+            elif storage.startswith("chunk-session:"):
+                from app.services.replicate_media import build_replicate_media_url
+
+                video_url = build_replicate_media_url(file_id)
+            elif storage.startswith(("http://", "https://")):
+                video_url = storage
+            else:
+                from app.services.replicate_media import build_replicate_media_url
+
+                video_url = build_replicate_media_url(file_id)
+        if not video_url:
+            video_url = (
+                "https://storage.googleapis.com/cloud-samples-data/"
+                "generative-ai/video/ad_copy_from_video.mp4"
+            )
+        prompt = (payload.get("prompt") or "").strip() or (
+            "Опиши это видео одним предложением на русском."
+        )
+        wait_seconds = min(int(payload.get("wait_seconds") or 90), 300)
+
+        def _probe_input(model: str) -> dict:
+            slug = model.rsplit("/", 1)[-1]
+            if "cogvlm2-video" in slug:
+                return {
+                    "input_video": video_url,
+                    "prompt": prompt,
+                    "temperature": 0.1,
+                    "top_p": 0.1,
+                    "max_new_tokens": 512,
+                }
+            if "qwen2-vl" in slug:
+                return {
+                    "media": video_url,
+                    "prompt": prompt,
+                    "max_new_tokens": 512,
+                }
+            inp: dict = {
+                "prompt": prompt,
+                "videos": [video_url],
+                "temperature": 0.2,
+                "max_output_tokens": 1024,
+            }
+            if "3.5-flash" in model or model.endswith("gemini-3-flash"):
+                inp["video_fps"] = 1
+            elif "2.5" in model:
+                inp["thinking_budget"] = 0
+            return inp
+
+        # Community models use version-hash predictions, not /models/{owner}/{name}/predictions.
+        VERSION_OVERRIDES = {
+            "chenxwh/cogvlm2-video": (
+                "9da7e9a554d36bb7b5fec36b43b00e4616dc1e819bc963ded8e053d8d8196cb5"
+            ),
+            "lucataco/qwen2-vl-7b-instruct": (
+                "bf57361c75677fc33d480d0c5f02926e621b2caa2000347cb74aeae9d2ca07ee"
+            ),
+        }
+
+        client = _replicate.Client(api_token=settings.REPLICATE_API_TOKEN)
+        results: list[dict] = []
+        for model in models[:8]:
+            entry: dict = {"model": model}
+            try:
+                probe_input = _probe_input(model)
+                version_id = VERSION_OVERRIDES.get(model)
+                if version_id:
+                    pred = await asyncio.to_thread(
+                        client.predictions.create,
+                        version=version_id,
+                        input=probe_input,
+                    )
+                else:
+                    pred = await asyncio.to_thread(
+                        client.predictions.create,
+                        model=model,
+                        input=probe_input,
+                    )
+                entry["prediction_id"] = pred.id
+                deadline = time.time() + wait_seconds
+                while time.time() < deadline:
+                    pred = await asyncio.to_thread(client.predictions.get, pred.id)
+                    entry["status"] = pred.status
+                    if pred.status in {"succeeded", "failed", "canceled"}:
+                        entry["error"] = str(pred.error)[:2000] if pred.error else None
+                        entry["logs"] = (pred.logs or "")[-1500:]
+                        if pred.status == "succeeded":
+                            out = pred.output
+                            if isinstance(out, list):
+                                entry["output_preview"] = "".join(str(x) for x in out)[:500]
+                            else:
+                                entry["output_preview"] = str(out)[:500]
+                        break
+                    await asyncio.sleep(4)
+                else:
+                    entry["status"] = entry.get("status", "timeout")
+                    entry["error"] = entry.get("error") or f"timeout after {wait_seconds}s"
+            except Exception as exc:
+                entry["status"] = "exception"
+                entry["error"] = f"{type(exc).__name__}: {exc}"[:2000]
+            results.append(entry)
+        return {"video_url": video_url, "results": results}
+
+    file_id = (payload.get("file_id") or "").strip()
+    name_like = (payload.get("name_like") or "").strip()
+    status = (payload.get("status") or "").strip()
+    recent_only = bool(payload.get("recent_only"))
+    limit = min(int(payload.get("limit") or 10), 50)
+
+    stmt = (
+        select(VideoFile, AnalysisJob)
+        .outerjoin(AnalysisJob, AnalysisJob.video_file_id == VideoFile.id)
+        .order_by(VideoFile.updated_at.desc())
+        .limit(limit)
+    )
+    if file_id:
+        stmt = stmt.where(VideoFile.id == file_id)
+    elif name_like:
+        safe = name_like.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(VideoFile.name.ilike(f"%{safe}%", escape="\\"))
+    elif status:
+        stmt = stmt.where(VideoFile.status == status)
+    elif not recent_only:
+        stmt = stmt.where(VideoFile.status == "error")
+
+    rows = (await db.execute(stmt)).all()
+
+    if bool(payload.get("retry")) and file_id and rows:
+        video = rows[0][0]
+        video.status = "analyzing"
+        video.progress = 10
+        video.analysis_id = None
+        video.replicate_prediction_id = None
+        video.analysis_attempts = 0
+        await db.flush()
+        try:
+            await _kickoff_analysis(video, db)
+            return {
+                "retry": {
+                    "ok": True,
+                    "status": video.status,
+                    "replicate_prediction_id": video.replicate_prediction_id,
+                }
+            }
+        except HTTPException as e:
+            return {"retry": {"ok": False, "detail": str(e.detail)}}
+
+    prediction_id = (payload.get("prediction_id") or "").strip()
+    if prediction_id:
+        import replicate as _replicate
+
+        client = _replicate.Client(api_token=settings.REPLICATE_API_TOKEN)
+        try:
+            pred = await asyncio.to_thread(client.predictions.get, prediction_id)
+            return {
+                "prediction": {
+                    "id": pred.id,
+                    "status": pred.status,
+                    "model": getattr(pred, "model", None),
+                    "version": getattr(pred, "version", None),
+                    "error": str(pred.error)[:2000] if pred.error else None,
+                    "logs": (pred.logs or "")[-3000:],
+                    "created_at": str(getattr(pred, "created_at", "")),
+                    "input_keys": sorted((pred.input or {}).keys()),
+                }
+            }
+        except Exception as e:
+            return {"prediction": {"error": f"{type(e).__name__}: {e}"}}
+
+    if bool(payload.get("poll")) and file_id and rows:
+        video = rows[0][0]
+        await _maybe_finish_analysis(video, db)
+        refreshed = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
+        video = refreshed.scalar_one_or_none() or video
+        return {
+            "poll": {
+                "status": video.status,
+                "progress": video.progress,
+                "analysis_id": video.analysis_id,
+                "replicate_prediction_id": video.replicate_prediction_id,
+            }
+        }
+
+    return {
+        "count": len(rows),
+        "items": [
+            {
+                "id": video.id,
+                "name": video.name,
+                "status": video.status,
+                "progress": video.progress,
+                "size": video.size,
+                "duration_seconds": video.duration_seconds,
+                "updated_at": video.updated_at.isoformat() if video.updated_at else None,
+                "created_at": video.created_at.isoformat() if video.created_at else None,
+                "project_id": video.project_id,
+                "storage_path": (video.storage_path or "")[:200],
+                "replicate_prediction_id": video.replicate_prediction_id,
+                "job_status": job.status if job else None,
+                "attempts": job.attempts if job else None,
+                "last_error": job.last_error if job else None,
+            }
+            for video, job in rows
+        ],
+    }
 
 
 @router.post("/blob-cleanup")

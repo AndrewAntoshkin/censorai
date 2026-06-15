@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -99,6 +100,36 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       void refresh();
     }, 30_000);
     return () => window.clearInterval(poll);
+  }, [user, refresh]);
+
+  // Background driver: keep in-progress analyses moving app-wide. Long videos are
+  // analyzed segment-by-segment, and each `GET /api/files/{id}` synchronously runs
+  // one segment on the server. Polling here means analyses keep advancing on any
+  // page and even after a full page reload (they resume from server state), not
+  // just while the upload dialog is open. At most one in-flight drive per file.
+  const recentRef = useRef<VideoFileAPI[]>([]);
+  recentRef.current = recentFiles;
+  const drivingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!user) return;
+    const WORKING = new Set(["uploading", "uploaded", "analyzing"]);
+    const tick = () => {
+      for (const file of recentRef.current) {
+        if (!WORKING.has((file.status || "").toLowerCase())) continue;
+        if (drivingRef.current.has(file.id)) continue;
+        drivingRef.current.add(file.id);
+        void api.files
+          .get(file.id)
+          .catch(() => {})
+          .finally(() => {
+            drivingRef.current.delete(file.id);
+            void refresh();
+          });
+      }
+    };
+    const interval = window.setInterval(tick, 8_000);
+    tick();
+    return () => window.clearInterval(interval);
   }, [user, refresh]);
 
   const value = useMemo(
