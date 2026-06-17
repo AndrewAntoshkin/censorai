@@ -39,6 +39,32 @@ def needs_segmentation(
     return total_seconds > max_seg
 
 
+def size_aware_segment_seconds(
+    total_seconds: int | None,
+    size_bytes: int | None,
+    max_segment_seconds: int,
+    max_segment_mb: int,
+    *,
+    min_segment_seconds: int = 60,
+) -> int:
+    """Shrink segment length so each chunk stays under ``max_segment_mb``.
+
+    A short but high-bitrate video would otherwise be one huge upload that does
+    not fit a single serverless invocation; this trims the per-segment seconds
+    based on the file's bytes-per-second so each chunk is upload-safe.
+    """
+    if not max_segment_mb or max_segment_mb <= 0:
+        return max_segment_seconds
+    if not total_seconds or total_seconds <= 0 or not size_bytes or size_bytes <= 0:
+        return max_segment_seconds
+    bytes_per_sec = size_bytes / total_seconds
+    if bytes_per_sec <= 0:
+        return max_segment_seconds
+    by_size = int((max_segment_mb * 1024 * 1024) / bytes_per_sec)
+    by_size = max(by_size, min_segment_seconds)
+    return min(max_segment_seconds, by_size)
+
+
 def plan_segment_ranges(
     total_seconds: int, max_segment_seconds: int = MAX_SEGMENT_SECONDS
 ) -> list[tuple[int, int]]:

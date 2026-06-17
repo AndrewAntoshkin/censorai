@@ -34,9 +34,20 @@ async def setup_direct_analysis(
 ) -> None:
     """Mark a file for direct Gemini; plan segments when the video is long."""
     from app.services.analysis_jobs import set_job_metadata
-    from app.services.video_segmentation import needs_segmentation, plan_segment_ranges
+    from app.services.video_segmentation import (
+        needs_segmentation,
+        plan_segment_ranges,
+        size_aware_segment_seconds,
+    )
 
-    max_seg = settings.GEMINI_DIRECT_SEGMENT_SECONDS
+    # Cap segment length by both duration and bytes, so high-bitrate files are
+    # split into upload-safe chunks even when they are short.
+    max_seg = size_aware_segment_seconds(
+        total_seconds,
+        video.size,
+        settings.GEMINI_DIRECT_SEGMENT_SECONDS,
+        settings.GEMINI_DIRECT_MAX_SEGMENT_MB,
+    )
     if total_seconds and needs_segmentation(total_seconds, max_seg):
         ranges = plan_segment_ranges(total_seconds, max_seg)
         metadata = {

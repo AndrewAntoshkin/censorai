@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # Long videos are cut into chunks of this size so each generate_content call
     # stays under the time limit and produces a JSON small enough to not truncate.
     GEMINI_DIRECT_SEGMENT_SECONDS: int = 600
+    # Also cap each direct segment by SIZE, not just duration: a short but
+    # high-bitrate file (e.g. 295 MB / 4 min) is split so each chunk's upload to
+    # Gemini fits one serverless invocation and /tmp (~512 MB on Vercel).
+    GEMINI_DIRECT_MAX_SEGMENT_MB: int = 150
 
     REPLICATE_API_TOKEN: str = ""
     REPLICATE_MODEL: str = "google/gemini-3.5-flash"
