@@ -55,6 +55,10 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Stronger model tried automatically when GEMINI_MODEL refuses content
+    # (block_reason). It is a different model, so it sometimes analyzes footage
+    # that Flash blocks. Empty disables the fallback.
+    GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
 
     # "direct_gemini" (Google AI Studio, bypasses Replicate) or "replicate".
     # Replicate Gemini currently fails uploads with E001, so direct is the default.

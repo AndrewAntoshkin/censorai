@@ -218,7 +218,7 @@ class GeminiService:
             raise RuntimeError("GEMINI_API_KEY is not configured")
 
         genai.configure(api_key=api_key)
-        model_slug = (model_name or settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        model_slugs = self._fallback_model_slugs(model_name)
         prompt = (prompt_override or "").strip() or self._build_analysis_prompt(
             expected_duration_seconds=expected_duration_seconds,
             extra_prompt_suffix=extra_prompt_suffix,
@@ -239,7 +239,7 @@ class GeminiService:
             tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'inline'}.mp4"
             try:
                 tmp.write_bytes(base64.b64decode(encoded))
-                return self._direct_generate_from_path(str(tmp), prompt, model_slug, mime=mime)
+                return self._direct_generate_from_path(str(tmp), prompt, model_slugs, mime=mime)
             finally:
                 tmp.unlink(missing_ok=True)
 
@@ -272,12 +272,12 @@ class GeminiService:
                         for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
                             out.write(chunk)
                 return self._direct_generate_from_path(
-                    str(tmp), prompt, model_slug, mime=content_type
+                    str(tmp), prompt, model_slugs, mime=content_type
                 )
             finally:
                 tmp.unlink(missing_ok=True)
 
-        return self._direct_generate_from_path(video_uri, prompt, model_slug)
+        return self._direct_generate_from_path(video_uri, prompt, model_slugs)
 
     def analyze_local_file_direct(
         self,
@@ -298,23 +298,43 @@ class GeminiService:
         import google.generativeai as genai
 
         genai.configure(api_key=settings.GEMINI_API_KEY.strip())
-        model_slug = (model_name or settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
         prompt = self._build_analysis_prompt(
             expected_duration_seconds=expected_duration_seconds,
             extra_prompt_suffix=extra_prompt_suffix,
         )
         mime = mimetypes.guess_type(local_path)[0] or "video/mp4"
-        return self._direct_generate_from_path(local_path, prompt, model_slug, mime=mime)
+        return self._direct_generate_from_path(
+            local_path, prompt, self._fallback_model_slugs(model_name), mime=mime
+        )
+
+    def _fallback_model_slugs(self, model_name: str | None = None) -> list[str]:
+        """Model chain: explicit override, else Flash then (different) Pro."""
+        if model_name and model_name.strip():
+            return [model_name.strip()]
+        flash = (settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        slugs = [flash]
+        pro = (settings.GEMINI_PRO_MODEL or "").strip()
+        if pro and pro != flash:
+            slugs.append(pro)
+        return slugs
 
     def _direct_generate_from_path(
         self,
         local_path: str,
         prompt: str,
-        model_slug: str,
+        model_slugs: str | list[str],
         *,
         mime: str | None = None,
     ) -> GeminiAnalysisResult:
+        """Upload once, then try each model in order; a content block falls
+        through to the next model, other errors propagate immediately."""
         import google.generativeai as genai
+
+        from app.services.analysis_errors import ContentBlockedError
+
+        slugs = [model_slugs] if isinstance(model_slugs, str) else list(model_slugs)
+        if not slugs:
+            slugs = [(settings.GEMINI_MODEL or "gemini-2.5-flash").strip()]
 
         if mime:
             uploaded = genai.upload_file(local_path, mime_type=mime)
@@ -331,34 +351,65 @@ class GeminiService:
             if uploaded.state.name != "ACTIVE":
                 raise RuntimeError(f"Gemini file state: {uploaded.state.name}")
 
-            model = genai.GenerativeModel(model_slug)
-            response = model.generate_content(
-                [uploaded, prompt],
-                generation_config=genai.GenerationConfig(
-                    temperature=0.2,
-                    max_output_tokens=min(FULL_ANALYSIS_MAX_OUTPUT_TOKENS, 65535),
-                    response_mime_type="application/json",
-                ),
-                safety_settings=GEMINI_SAFETY_SETTINGS,
-                request_options={"timeout": 600},
-            )
-            feedback = getattr(response, "prompt_feedback", None)
-            block_reason = getattr(feedback, "block_reason", None)
-            if block_reason:
-                raise RuntimeError(
-                    f"Gemini blocked the input (block_reason={block_reason}). "
-                    "Контент отклонён моделью даже при отключённых фильтрах."
-                )
-            raw = (response.text or "").strip()
-            if not raw:
-                raise RuntimeError("Empty response from direct Gemini API")
-            logger.info("Direct Gemini response (%d chars)", len(raw))
-            return self._parse_response(raw)
+            last_block: ContentBlockedError | None = None
+            for index, slug in enumerate(slugs):
+                try:
+                    return self._generate_with_model(genai, uploaded, prompt, slug)
+                except ContentBlockedError as blocked:
+                    last_block = blocked
+                    if index + 1 < len(slugs):
+                        logger.warning(
+                            "Model %s blocked content (%s); falling back to %s",
+                            slug,
+                            blocked.block_reason,
+                            slugs[index + 1],
+                        )
+                        continue
+            raise last_block or ContentBlockedError(message="Content blocked by model")
         finally:
             try:
                 genai.delete_file(uploaded.name)
             except Exception:
                 logger.debug("Failed to delete Gemini uploaded file", exc_info=True)
+
+    def _generate_with_model(
+        self, genai, uploaded, prompt: str, model_slug: str
+    ) -> GeminiAnalysisResult:
+        from app.services.analysis_errors import ContentBlockedError
+
+        model = genai.GenerativeModel(model_slug)
+        response = model.generate_content(
+            [uploaded, prompt],
+            generation_config=genai.GenerationConfig(
+                temperature=0.2,
+                max_output_tokens=min(FULL_ANALYSIS_MAX_OUTPUT_TOKENS, 65535),
+                response_mime_type="application/json",
+            ),
+            safety_settings=GEMINI_SAFETY_SETTINGS,
+            request_options={"timeout": 600},
+        )
+        feedback = getattr(response, "prompt_feedback", None)
+        block_reason = getattr(feedback, "block_reason", None)
+        if block_reason:
+            raise ContentBlockedError(block_reason)
+
+        # Some blocks surface as an empty candidate list / non-STOP finish reason
+        # rather than prompt_feedback; treat those as content blocks too.
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            raise ContentBlockedError(message="No candidates returned (content blocked)")
+        finish = str(getattr(candidates[0], "finish_reason", "")).upper()
+        if any(tok in finish for tok in ("SAFETY", "RECITATION", "PROHIBITED", "BLOCK")):
+            raise ContentBlockedError(message=f"finish_reason={finish}")
+
+        try:
+            raw = (response.text or "").strip()
+        except (ValueError, AttributeError) as exc:
+            raise ContentBlockedError(message=f"No usable text ({exc})") from exc
+        if not raw:
+            raise RuntimeError("Empty response from direct Gemini API")
+        logger.info("Direct Gemini response from %s (%d chars)", model_slug, len(raw))
+        return self._parse_response(raw)
 
     def _model_input(
         self,

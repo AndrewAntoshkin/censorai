@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_factory
 from app.models.project import VideoFile
 from app.schemas.analysis import GeminiAnalysisResult
+from app.services.analysis_errors import (
+    ContentBlockedError,
+    build_full_review_result,
+    build_review_scene,
+)
 from app.services.direct_gemini_fallback import (
     DIRECT_PREDICTION_PENDING,
     DIRECT_SEGMENTED_KEY,
@@ -141,6 +146,16 @@ async def _run_direct_single(
                 file_size or 0, duration_seconds
             ),
         )
+    except ContentBlockedError as exc:
+        # Whole file refused by every model — still deliver an openable report
+        # flagged for manual review instead of a hard error.
+        logger.warning(
+            "Direct Gemini blocked entire file %s; delivering manual-review report",
+            file_id,
+        )
+        result = build_full_review_result(
+            None, int(duration_seconds or 0), reason=str(exc)
+        )
     except Exception as exc:
         logger.exception("Direct Gemini failed for file %s", file_id)
         await _fail_direct_gemini_fresh(file_id, f"Direct Gemini: {exc}")
@@ -171,6 +186,8 @@ async def _run_direct_segment(
     range_row = ranges[idx]
     source_path = metadata.get("source_path") or ""
 
+    blocked = False
+    block_reason = ""
     try:
         result = await asyncio.to_thread(
             run_direct_segment_sync,
@@ -181,6 +198,18 @@ async def _run_direct_segment(
             index=idx,
             total=total,
             extra_prompt_suffix=metadata.get("extra_prompt_suffix", ""),
+        )
+    except ContentBlockedError as exc:
+        # One segment refused by every model — skip it (deliver the rest) and
+        # flag the range for manual review instead of failing the whole file.
+        blocked = True
+        block_reason = str(exc)
+        result = GeminiAnalysisResult()
+        logger.warning(
+            "Direct Gemini segment %d/%d blocked for %s; delivering partial",
+            idx + 1,
+            total,
+            file_id,
         )
     except Exception as exc:
         logger.exception(
@@ -208,6 +237,16 @@ async def _run_direct_segment(
         partial = list(meta.get("partial_results") or [])
         partial.append(result.model_dump())
         meta["partial_results"] = partial
+        if blocked:
+            blocked_ranges = list(meta.get("blocked_ranges") or [])
+            blocked_ranges.append(
+                {
+                    "start_sec": int(range_row["start_sec"]),
+                    "duration_sec": int(range_row["duration_sec"]),
+                    "reason": block_reason,
+                }
+            )
+            meta["blocked_ranges"] = blocked_ranges
 
         if idx + 1 < total:
             meta["current_index"] = idx + 1
@@ -233,10 +272,30 @@ async def _run_direct_segment(
             int(meta.get("total_duration_sec") or 0),
             locked.name,
         )
+        _append_review_scenes(merged, meta.get("blocked_ranges"))
         meta.pop(DIRECT_SEGMENTED_KEY, None)
         await set_job_metadata(s, file_id, meta)
         await _persist_result(file_id, running_marker, merged, s, save_result=save_result)
         await s.commit()
+
+
+def _append_review_scenes(
+    merged: GeminiAnalysisResult, blocked_ranges: list | None
+) -> None:
+    """Append a manual-review finding for each segment the model refused."""
+    if not blocked_ranges:
+        return
+    next_num = max((s.scene_number for s in merged.scenes), default=0) + 1
+    for br in blocked_ranges:
+        merged.scenes.append(
+            build_review_scene(
+                next_num,
+                int(br.get("start_sec") or 0),
+                int(br.get("duration_sec") or 0),
+                reason=br.get("reason"),
+            )
+        )
+        next_num += 1
 
 
 async def _fail_direct_gemini_fresh(file_id: str, message: str) -> None:

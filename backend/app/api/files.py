@@ -284,8 +284,10 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
 async def _save_analysis_result(
     video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
 ) -> Analysis | None:
+    from app.services.analysis_errors import is_review_result
+
     expected = _expected_duration(video)
-    if is_incomplete_coverage(
+    if not is_review_result(gemini_result) and is_incomplete_coverage(
         video.size or 0,
         gemini_result,
         expected_seconds=expected,
