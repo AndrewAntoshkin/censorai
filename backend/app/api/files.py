@@ -1478,15 +1478,21 @@ def _build_summary_dict(
     file_size_bytes: int = 0,
     expected_seconds: int | None = None,
 ) -> dict:
+    from app.services.analysis_errors import REVIEW_RISK
+
     scenes_with_risks = [gs for gs in gemini_result.scenes if gs.risks]
     total_reviewed = gemini_result.total_scenes_reviewed or len(gemini_result.scenes)
     risky_scene_numbers = {gs.scene_number for gs in scenes_with_risks}
     categories: dict[str, int] = {}
     critical = 0
     warning = 0
+    review_count = 0
 
     for gs in scenes_with_risks:
         for r in gs.risks:
+            if (r.risk or "") == REVIEW_RISK:
+                review_count += 1
+                continue
             if r.risk:
                 categories[r.risk] = categories.get(r.risk, 0) + 1
             if r.risk_level == "critical":
@@ -1501,6 +1507,8 @@ def _build_summary_dict(
         "critical_count": critical,
         "warning_count": warning,
     }
+    if review_count:
+        summary["review_count"] = review_count
 
     if gemini_result.recommended_age_rating:
         summary["recommended_age_rating"] = gemini_result.recommended_age_rating

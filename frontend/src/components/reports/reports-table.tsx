@@ -299,6 +299,7 @@ export function ReportsTable({
                           status={file.status}
                           progress={file.progress}
                           riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                          reviewCount={file.analysis?.summary?.review_count ?? null}
                         />
                       </td>
                       <td className="px-2 py-3 text-right">

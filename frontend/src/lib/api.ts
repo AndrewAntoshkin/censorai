@@ -135,6 +135,7 @@ function demoRequest<T>(path: string, options?: RequestInit): T {
 export interface AnalysisSummaryAPI {
   total_scenes: number;
   risky_scenes: number;
+  review_count?: number;
   risk_categories: Record<string, number>;
   critical_count: number;
   warning_count: number;

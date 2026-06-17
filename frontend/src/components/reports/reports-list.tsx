@@ -64,6 +64,7 @@ export function ReportsList({
                 status={file.status}
                 progress={file.progress}
                 riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                reviewCount={file.analysis?.summary?.review_count ?? null}
                 className="ml-auto shrink-0"
               />
             </div>
@@ -78,6 +79,7 @@ export function ReportsList({
                 status={file.status}
                 progress={file.progress}
                 riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
+                reviewCount={file.analysis?.summary?.review_count ?? null}
                 className="ml-auto shrink-0"
               />
             </Link>

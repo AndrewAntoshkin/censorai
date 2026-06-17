@@ -5,6 +5,8 @@ interface FileStatusBadgeProps {
   progress?: number;
   /** number of risky scenes when analyzed; null/undefined if unknown */
   riskyScenes?: number | null;
+  /** number of fragments the model could not analyze (manual review needed) */
+  reviewCount?: number | null;
   className?: string;
 }
 
@@ -15,6 +17,7 @@ export function FileStatusBadge({
   status,
   progress,
   riskyScenes,
+  reviewCount,
   className,
 }: FileStatusBadgeProps) {
   if (status === "processing" || status === "analyzing") {
@@ -52,6 +55,13 @@ export function FileStatusBadge({
 
   // analyzed / completed
   if (status === "analyzed" || status === "completed" || riskyScenes != null) {
+    if (reviewCount && reviewCount > 0) {
+      return (
+        <span className={cn(base, "bg-warning-soft text-warning", className)}>
+          Требует проверки
+        </span>
+      );
+    }
     if (riskyScenes && riskyScenes > 0) {
       return (
         <span className={cn(base, "bg-critical-soft text-critical", className)}>
