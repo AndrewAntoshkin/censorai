@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 ANALYSIS_PROMPT = VIDEO_ANALYSIS_PROMPT
 
+# This is a content-moderation tool: it must inspect explicit/violent material,
+# so Gemini's default safety filters (which would return empty candidates with
+# block_reason) must be disabled. String form is accepted by google-generativeai.
+GEMINI_SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
+
 
 def _is_transient_replicate_error(exc: Exception) -> bool:
     msg = str(exc).lower()
@@ -221,11 +231,14 @@ class GeminiService:
             import tempfile
             from pathlib import Path
 
+            from app.services.video_segmentation import sweep_stale_temp_media
+
+            sweep_stale_temp_media()
             header, encoded = video_uri.split(",", 1)
             mime = header.split(":")[1].split(";")[0]
             tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'inline'}.mp4"
-            tmp.write_bytes(base64.b64decode(encoded))
             try:
+                tmp.write_bytes(base64.b64decode(encoded))
                 return self._direct_generate_from_path(str(tmp), prompt, model_slug, mime=mime)
             finally:
                 tmp.unlink(missing_ok=True)
@@ -234,18 +247,25 @@ class GeminiService:
             import tempfile
             from pathlib import Path
 
-            with httpx.Client(
-                timeout=httpx.Timeout(600.0, connect=60.0), follow_redirects=True
-            ) as client:
-                resp = client.get(video_uri)
-                resp.raise_for_status()
-                content_type = (
-                    resp.headers.get("content-type", "").split(";")[0].strip()
-                    or "video/mp4"
-                )
-                tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'remote'}.mp4"
-                tmp.write_bytes(resp.content)
+            from app.services.video_segmentation import sweep_stale_temp_media
+
+            # Clear leaked temps from killed/concurrent runs before we write a
+            # 100+ MB download, otherwise /tmp (~512 MB on Vercel) overflows.
+            sweep_stale_temp_media()
+            tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'remote'}.mp4"
+            content_type = "video/mp4"
             try:
+                with httpx.Client(
+                    timeout=httpx.Timeout(600.0, connect=60.0), follow_redirects=True
+                ) as client, client.stream("GET", video_uri) as resp:
+                    resp.raise_for_status()
+                    content_type = (
+                        resp.headers.get("content-type", "").split(";")[0].strip()
+                        or "video/mp4"
+                    )
+                    with open(tmp, "wb") as out:
+                        for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                            out.write(chunk)
                 return self._direct_generate_from_path(
                     str(tmp), prompt, model_slug, mime=content_type
                 )
@@ -314,8 +334,16 @@ class GeminiService:
                     max_output_tokens=min(FULL_ANALYSIS_MAX_OUTPUT_TOKENS, 65535),
                     response_mime_type="application/json",
                 ),
+                safety_settings=GEMINI_SAFETY_SETTINGS,
                 request_options={"timeout": 600},
             )
+            feedback = getattr(response, "prompt_feedback", None)
+            block_reason = getattr(feedback, "block_reason", None)
+            if block_reason:
+                raise RuntimeError(
+                    f"Gemini blocked the input (block_reason={block_reason}). "
+                    "Контент отклонён моделью даже при отключённых фильтрах."
+                )
             raw = (response.text or "").strip()
             if not raw:
                 raise RuntimeError("Empty response from direct Gemini API")

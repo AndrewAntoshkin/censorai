@@ -134,20 +134,30 @@ def _segment_source(storage_path: str, *, file_id: str | None = None) -> tuple[s
     return source, temps
 
 
-def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
-    """Delete leaked segment temp files from prior (possibly killed) invocations.
+# Temp media left behind by killed/concurrent analysis runs on warm Vercel
+# instances. Covers both ffmpeg segment cuts and full-file direct downloads.
+_STALE_TEMP_PATTERNS = (
+    "*_seg*.mp4",
+    "*_seg*.mp4.*",
+    "gemini_direct_*.mp4",
+    "gemini_direct_*.mp4.*",
+)
+
+
+def sweep_stale_temp_media(max_age_seconds: int = 30) -> None:
+    """Delete leaked temp media from prior (possibly killed) invocations.
 
     Vercel reuses /tmp (~512 MB) across warm invocations. A run that is killed
-    mid-cut (timeout/OOM) leaves its 100+ MB segment file behind; after enough
-    invocations these accumulate and overflow /tmp, making later cuts fail with
-    "No space left on device". We sweep before each cut so only the current
-    segment occupies disk. Files younger than `max_age_seconds` are left alone
-    to avoid touching anything an in-flight cut just created.
+    mid-cut/mid-download (timeout/OOM) leaves its 100+ MB file behind; after
+    enough invocations these accumulate and overflow /tmp, making later
+    cuts/downloads fail with "No space left on device". We sweep before each
+    cut/download so only in-flight work occupies disk. Files younger than
+    ``max_age_seconds`` are left alone so a concurrent run is not disturbed.
     """
     tmpdir = Path(tempfile.gettempdir())
     now = time.time()
     freed = 0
-    for pattern in ("*_seg*.mp4", "*_seg*.mp4.*"):
+    for pattern in _STALE_TEMP_PATTERNS:
         for path in tmpdir.glob(pattern):
             try:
                 stat = path.stat()
@@ -157,7 +167,11 @@ def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
             except OSError:
                 pass
     if freed:
-        logger.info("Swept %.1f MB of stale segment temps from /tmp", freed / 1024 / 1024)
+        logger.info("Swept %.1f MB of stale temp media from /tmp", freed / 1024 / 1024)
+
+
+def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
+    sweep_stale_temp_media(max_age_seconds)
 
 
 def prepare_single_segment_file(

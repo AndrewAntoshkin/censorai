@@ -71,7 +71,10 @@ class Settings(BaseSettings):
     UPLOAD_MAX_SIZE_MB: int = 500
     UPLOAD_DIR: str = "./uploads"
 
-    GEMINI_MAX_CONCURRENT: int = 3
+    # Each direct analysis buffers a full video to /tmp (~512 MB on Vercel) and
+    # into RAM, so concurrent runs on one warm instance overflow disk/memory.
+    # Keep this at 1 on serverless; raise only on a dedicated worker with disk.
+    GEMINI_MAX_CONCURRENT: int = 1
 
     # Files larger than this use Blob URL or signed /replicate-media (not base64 inline).
     INLINE_VIDEO_MAX_MB: int = 4
