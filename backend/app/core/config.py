@@ -115,7 +115,9 @@ class Settings(BaseSettings):
     WORKER_DEV_POLL_SECRET: str = ""
     # When Redis is down locally, API process polls analyzing videos in the background.
     DEV_ANALYSIS_POLL_ENABLED: bool = True
-    ANALYSIS_JOB_MAX_ATTEMPTS: int = 5
+    # Higher cap so transient retries (disk/network/model pressure) have room to
+    # self-heal across worker ticks before a file is shown as a real error.
+    ANALYSIS_JOB_MAX_ATTEMPTS: int = 10
     ANALYSIS_STALE_JOB_HOURS: int = 6
     # ffmpeg scene-change hints appended to the model prompt (stage 4 pre-pass).
     ANALYSIS_CASCADE_ENABLED: bool = False

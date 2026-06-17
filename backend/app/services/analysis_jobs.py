@@ -66,6 +66,92 @@ async def mark_job_completed(db: AsyncSession, video_file_id: str) -> None:
     await db.flush()
 
 
+# Substrings that mean "try again later", not "this file is broken". These
+# come from shared serverless resources (disk/network/model capacity), so the
+# same file usually succeeds on a later attempt once the pressure clears.
+_TRANSIENT_ERROR_MARKERS = (
+    "no space left on device",
+    "errno 28",
+    "недостаточно места",
+    "insufficient_tmp_space",
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "rate limit",
+    "rate_limit",
+    "resource exhausted",
+    "resource_exhausted",
+    "connection reset",
+    "connection aborted",
+    "connection error",
+    "interrupted",
+    "code: pa",
+    "503",
+    "502",
+    "500 internal",
+    "deadline exceeded",
+    "remoteprotocolerror",
+    "read timed out",
+)
+
+# Substrings that mean "this content/file will never pass" — fail fast, no retry.
+_PERMANENT_ERROR_MARKERS = (
+    "block_reason",
+    "blocked the input",
+    "prohibited",
+    "no storage path",
+    "file has no storage",
+    "not found",
+    "filenotfound",
+)
+
+
+def is_transient_analysis_error(error: str | Exception) -> bool:
+    """True if the error is worth an automatic retry (shared-resource pressure)."""
+    msg = str(error).lower()
+    if any(marker in msg for marker in _PERMANENT_ERROR_MARKERS):
+        return False
+    return any(marker in msg for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+async def requeue_transient_failure(
+    db: AsyncSession, video_file_id: str, error: str, *, count_attempt: bool = True
+) -> bool:
+    """Re-queue a transiently-failed analysis instead of marking it errored.
+
+    Returns True if re-queued (caller should keep status=analyzing and reset the
+    prediction marker to pending). Returns False once attempts are exhausted, so
+    the caller falls through to a real ``error`` state.
+    """
+    row = await db.execute(
+        select(AnalysisJob).where(AnalysisJob.video_file_id == video_file_id)
+    )
+    job = row.scalar_one_or_none()
+    max_attempts = settings.ANALYSIS_JOB_MAX_ATTEMPTS
+    if job is None:
+        job = AnalysisJob(
+            video_file_id=video_file_id,
+            status=AnalysisJobStatus.QUEUED.value,
+            attempts=1,
+            last_error=f"Transient, will retry: {error[:1500]}",
+        )
+        db.add(job)
+        await db.flush()
+        return True
+
+    attempts = job.attempts or 0
+    if count_attempt and attempts >= max_attempts:
+        return False
+    if count_attempt:
+        job.attempts = attempts + 1
+    job.status = AnalysisJobStatus.QUEUED.value
+    job.last_error = (
+        f"Transient (attempt {job.attempts}/{max_attempts}), auto-retry: {error[:1500]}"
+    )
+    await db.flush()
+    return True
+
+
 async def mark_job_failed(db: AsyncSession, video_file_id: str, error: str) -> None:
     row = await db.execute(
         select(AnalysisJob).where(AnalysisJob.video_file_id == video_file_id)

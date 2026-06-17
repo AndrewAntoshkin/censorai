@@ -274,12 +274,33 @@ async def _fail_direct_gemini(
     locked = row.scalar_one_or_none()
     if not locked or locked.status != "analyzing":
         return
+
+    from app.services.analysis_jobs import (
+        is_transient_analysis_error,
+        mark_job_failed,
+        requeue_transient_failure,
+    )
+
+    if is_transient_analysis_error(message):
+        # Pure capacity wait (disk full pre-flight) shouldn't burn an attempt.
+        count_attempt = "INSUFFICIENT_TMP_SPACE" not in message
+        if await requeue_transient_failure(
+            db, file_id, message, count_attempt=count_attempt
+        ):
+            logger.warning(
+                "Direct Gemini transient failure for %s, auto-retrying: %s",
+                file_id,
+                message[:200],
+            )
+            locked.replicate_prediction_id = DIRECT_PREDICTION_PENDING
+            locked.progress = max(locked.progress or 0, 30)
+            await db.flush()
+            return
+
     logger.error("Direct Gemini fallback failed for %s: %s", file_id, message[:300])
     locked.status = "error"
     locked.replicate_prediction_id = None
     await db.flush()
-    from app.services.analysis_jobs import mark_job_failed
-
     await mark_job_failed(db, file_id, message)
 
 
@@ -437,10 +458,27 @@ async def _handle_poll_error(
     if not locked or locked.status != "analyzing":
         return
 
+    from app.services.analysis_jobs import (
+        is_transient_analysis_error,
+        mark_job_failed,
+        requeue_transient_failure,
+    )
+
+    if is_transient_analysis_error(exc) and await requeue_transient_failure(
+        db, file_id, str(exc)
+    ):
+        logger.warning(
+            "Replicate poll transient failure for %s, auto-retrying: %s",
+            file_id,
+            str(exc)[:200],
+        )
+        locked.replicate_prediction_id = None
+        locked.progress = max(locked.progress or 0, 10)
+        await db.flush()
+        return
+
     logger.exception("Poll failed for file %s", file_id)
     locked.status = "error"
     locked.replicate_prediction_id = None
     await db.flush()
-    from app.services.analysis_jobs import mark_job_failed
-
     await mark_job_failed(db, file_id, str(exc))

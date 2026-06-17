@@ -247,11 +247,16 @@ class GeminiService:
             import tempfile
             from pathlib import Path
 
-            from app.services.video_segmentation import sweep_stale_temp_media
+            from app.services.video_segmentation import (
+                ensure_tmp_space,
+                sweep_stale_temp_media,
+            )
 
             # Clear leaked temps from killed/concurrent runs before we write a
             # 100+ MB download, otherwise /tmp (~512 MB on Vercel) overflows.
             sweep_stale_temp_media()
+            # Refuse to start (transient → auto-retry) if /tmp can't hold the file.
+            ensure_tmp_space(file_size)
             tmp = Path(tempfile.gettempdir()) / f"gemini_direct_{file_id or 'remote'}.mp4"
             content_type = "video/mp4"
             try:

@@ -174,6 +174,36 @@ def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
     sweep_stale_temp_media(max_age_seconds)
 
 
+def ensure_tmp_space(required_bytes: int | None, *, margin: float = 1.5) -> None:
+    """Guard against errno 28: sweep, then refuse to start if /tmp can't fit work.
+
+    Raises ``RuntimeError("INSUFFICIENT_TMP_SPACE: ...")`` (classified as
+    transient) so the caller re-queues and waits for a less busy instance,
+    instead of writing a partial file and failing mid-way with errno 28.
+    """
+    if not required_bytes or required_bytes <= 0:
+        return
+    tmpdir = tempfile.gettempdir()
+    need = int(required_bytes * margin)
+    try:
+        free = shutil.disk_usage(tmpdir).free
+    except OSError:
+        return
+    if free >= need:
+        return
+    # Not enough room — reclaim anything left by killed/concurrent runs and recheck.
+    sweep_stale_temp_media(max_age_seconds=5)
+    try:
+        free = shutil.disk_usage(tmpdir).free
+    except OSError:
+        return
+    if free < need:
+        raise RuntimeError(
+            f"INSUFFICIENT_TMP_SPACE: need ~{need // (1024 * 1024)} MB, "
+            f"free {free // (1024 * 1024)} MB in {tmpdir}"
+        )
+
+
 def prepare_single_segment_file(
     storage_path: str,
     start_sec: int,
