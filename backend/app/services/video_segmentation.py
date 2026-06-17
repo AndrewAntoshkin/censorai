@@ -246,6 +246,9 @@ def prepare_single_segment_file(
         )
 
     _sweep_stale_segment_temps()
+    # Pre-flight: ensure /tmp can hold the cut output (transient wait if not),
+    # so a busy disk re-queues instead of producing a partial file + errno 28.
+    ensure_tmp_space(settings.GEMINI_DIRECT_MAX_SEGMENT_MB * 1024 * 1024)
     source, source_temps = _segment_source(storage_path, file_id=file_id)
     out = Path(tempfile.mkstemp(suffix=f"_seg{index}.mp4")[1])
     try:

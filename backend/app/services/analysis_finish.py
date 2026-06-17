@@ -282,10 +282,21 @@ async def _fail_direct_gemini(
     )
 
     if is_transient_analysis_error(message):
-        # Pure capacity wait (disk full pre-flight) shouldn't burn an attempt.
-        count_attempt = "INSUFFICIENT_TMP_SPACE" not in message
+        # A disk-space wait (pre-flight guard or ffmpeg errno 28) is pure
+        # capacity pressure from concurrent jobs, not a problem with this file,
+        # so it must not burn the retry budget — it clears once others finish.
+        msg_lower = message.lower()
+        disk_wait = any(
+            m in msg_lower
+            for m in (
+                "insufficient_tmp_space",
+                "no space left",
+                "errno 28",
+                "недостаточно места",
+            )
+        )
         if await requeue_transient_failure(
-            db, file_id, message, count_attempt=count_attempt
+            db, file_id, message, count_attempt=not disk_wait
         ):
             logger.warning(
                 "Direct Gemini transient failure for %s, auto-retrying: %s",
