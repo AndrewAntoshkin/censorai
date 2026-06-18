@@ -110,11 +110,13 @@ async def _process_queued_kickoffs(db: AsyncSession) -> int:
 async def _process_one(file_id: str, db: AsyncSession) -> None:
     from app.api.files import _maybe_finish_analysis
 
-    row = await db.execute(
-        select(VideoFile)
-        .where(VideoFile.id == file_id)
-        .with_for_update(skip_locked=True)
-    )
+    # IMPORTANT: do NOT take a FOR UPDATE row lock here. The direct-Gemini path
+    # claims the same row in a separate session via skip_locked; holding a lock
+    # here makes that inner claim see the row as locked and silently no-op, so a
+    # segmented file never advances under the autonomous poller (it only moved
+    # when the frontend's lock-free poll_direct path drove it). Mirror that
+    # lock-free read; concurrency is handled by the inner claim and persist.
+    row = await db.execute(select(VideoFile).where(VideoFile.id == file_id))
     video = row.scalar_one_or_none()
     if video is None or video.status != "analyzing":
         return
