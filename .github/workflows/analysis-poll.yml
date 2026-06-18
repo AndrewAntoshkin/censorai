@@ -1,0 +1,33 @@
+name: Analysis poll
+
+# Vercel is serverless and has no long-running arq worker, so analyses only
+# advance when something calls the poll cycle. Without this, a file that nobody
+# is actively viewing stalls for hours ("stuck since yesterday"). This workflow
+# is the autonomous driver: it pokes the poll endpoint on a schedule so queued
+# segments keep finishing on their own.
+
+on:
+  schedule:
+    # GitHub's minimum cron granularity is 5 min; each run self-loops at 30s
+    # intervals to cover the gap, giving ~30s effective polling.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: analysis-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drive analysis poll cycle
+        run: |
+          url="https://censorai.vercel.app/api/worker/poll-once?secret=censor-demo-2026"
+          for i in $(seq 1 9); do
+            code=$(curl -s -o /tmp/poll_out -w "%{http_code}" --max-time 150 "$url" || echo "000")
+            echo "tick $i -> HTTP $code"
+            head -c 400 /tmp/poll_out || true
+            echo
+            [ "$i" -lt 9 ] && sleep 30 || true
+          done

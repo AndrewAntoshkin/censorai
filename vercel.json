@@ -12,11 +12,5 @@
       "routePrefix": "/api",
       "maxDuration": 300
     }
-  },
-  "crons": [
-    {
-      "path": "/api/worker/poll-once?secret=censor-demo-2026",
-      "schedule": "* * * * *"
-    }
-  ]
+  }
 }
