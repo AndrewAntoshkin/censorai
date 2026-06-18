@@ -232,7 +232,7 @@ def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
     sweep_stale_temp_media(max_age_seconds)
 
 
-def ensure_tmp_space(required_bytes: int | None, *, margin: float = 1.5) -> None:
+def ensure_tmp_space(required_bytes: int | None, *, margin: float = 1.25) -> None:
     """Guard against errno 28: sweep, then refuse to start if /tmp can't fit work.
 
     Raises ``RuntimeError("INSUFFICIENT_TMP_SPACE: ...")`` (classified as
