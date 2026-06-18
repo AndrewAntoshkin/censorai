@@ -70,13 +70,18 @@ def is_incomplete_coverage(
     reported = parse_timecode_seconds(result.duration)
     last_end = max_scene_end_seconds(result)
 
-    if expected_seconds and expected_seconds > 120:
-        threshold = int(expected_seconds * 0.82)
+    # When ffprobe / client metadata gives the real length, judge coverage by
+    # duration only. File size misleads for high-bitrate shorts (e.g. 70 MB,
+    # 2 min) and used to flag complete analyses as incomplete.
+    if expected_seconds and expected_seconds > 0:
+        threshold = max(int(expected_seconds * 0.82), int(expected_seconds) - 30)
         if reported is not None and reported < threshold:
             return True
         if last_end > 0 and last_end < threshold:
             return True
+        return False
 
+    # Legacy fallback when duration is unknown (old uploads without metadata).
     size_mb = file_size_bytes / (1024 * 1024)
     if size_mb >= 20:
         min_expected = 8 * 60 if size_mb < 35 else 12 * 60

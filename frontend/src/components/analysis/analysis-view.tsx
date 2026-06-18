@@ -222,18 +222,45 @@ function parseDurationSeconds(value: string | null | undefined): number | null {
   return null;
 }
 
+function maxSceneEndSeconds(scenes: SceneAPI[]): number {
+  let last = 0;
+  for (const scene of scenes) {
+    for (const value of [scene.end_time, scene.start_time]) {
+      const sec = parseDurationSeconds(value);
+      if (sec !== null) last = Math.max(last, sec);
+    }
+  }
+  return last;
+}
+
+function coverageMeetsFileLength(
+  analysis: AnalysisAPI,
+  fileDurationSeconds: number | null
+): boolean {
+  if (!fileDurationSeconds || fileDurationSeconds <= 30) return false;
+  const threshold = Math.max(fileDurationSeconds * 0.82, fileDurationSeconds - 30);
+  const reported = parseDurationSeconds(analysis.duration);
+  const lastEnd = maxSceneEndSeconds(analysis.scenes);
+  if (reported !== null && reported >= threshold) return true;
+  if (lastEnd > 0 && lastEnd >= threshold) return true;
+  return false;
+}
+
 function looksIncomplete(
   summary: AnalysisAPI["summary"],
   analysis: AnalysisAPI,
-  fileSizeBytes: number | null
+  fileDurationSeconds: number | null
 ): boolean {
-  if (summary?.incomplete_coverage) return true;
   const title = (analysis.video_title || "").toLowerCase();
   if (title.includes("фрагмент")) return true;
-  const sizeMb = (fileSizeBytes ?? 0) / (1024 * 1024);
-  const reported = parseDurationSeconds(analysis.duration);
-  if (sizeMb >= 35 && reported !== null && reported < 12 * 60) return true;
-  return false;
+
+  if (!summary?.incomplete_coverage) return false;
+
+  // Suppress stale false positives saved before the duration-based fix
+  // (high-bitrate shorts flagged only by file size).
+  if (coverageMeetsFileLength(analysis, fileDurationSeconds)) return false;
+
+  return true;
 }
 
 function IncompleteCoverageBanner({
@@ -265,7 +292,7 @@ function IncompleteCoverageBanner({
 
 export function AnalysisView({ fileId }: AnalysisViewProps) {
   const [analysis, setAnalysis] = useState<AnalysisAPI | null>(null);
-  const [fileSize, setFileSize] = useState<number | null>(null);
+  const [fileDurationSeconds, setFileDurationSeconds] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -278,7 +305,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
       .then(([data, file]) => {
         if (!active) return;
         setAnalysis(data);
-        setFileSize(file.size);
+        setFileDurationSeconds(file.duration_seconds ?? null);
       })
       .catch((err) => active && setError(err.message))
       .finally(() => active && setLoading(false));
@@ -360,7 +387,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
   const violationScenes = analysis.scenes.filter((s) => s.risk);
   const summary = analysis.summary;
-  const incomplete = looksIncomplete(summary, analysis, fileSize);
+  const incomplete = looksIncomplete(summary, analysis, fileDurationSeconds);
   const foreignAgentHits =
     summary?.registry_verifications?.filter(
       (v) => v.registry_status === "in_registry" && v.registry === "foreign_agents"
@@ -377,7 +404,7 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
       <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col overflow-y-auto lg:overflow-hidden">
         <div className="shrink-0">
           <Link
-            href="/"
+            href="/reports"
             className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />

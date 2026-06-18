@@ -232,6 +232,7 @@ export interface VideoFileAPI {
   id: string;
   name: string;
   size: number;
+  duration_seconds?: number | null;
   status: string;
   progress: number;
   project_id: string;
