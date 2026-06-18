@@ -192,8 +192,40 @@ def sweep_stale_temp_media(max_age_seconds: int = 30) -> None:
                     path.unlink(missing_ok=True)
             except OSError:
                 pass
+    freed += _sweep_stale_upload_sessions(now)
     if freed:
         logger.info("Swept %.1f MB of stale temp media from /tmp", freed / 1024 / 1024)
+
+
+def _sweep_stale_upload_sessions(now: float, max_age_seconds: int = 2 * 3600) -> int:
+    """Reclaim chunk-upload leftovers (assembled/abandoned) that overflow /tmp.
+
+    Uploads finish in seconds; a session dir still present after hours is a
+    leftover from a killed assembly. These large blobs are the usual hidden
+    cause of a persistently near-full /tmp that traps later analyses in a
+    disk-wait loop. Returns bytes freed.
+    """
+    try:
+        root = Path(settings.UPLOAD_DIR) / "_chunk_sessions"
+    except Exception:
+        return 0
+    if not root.exists():
+        return 0
+    freed = 0
+    for session_dir in root.iterdir():
+        try:
+            if now - session_dir.stat().st_mtime <= max_age_seconds:
+                continue
+            for child in session_dir.rglob("*"):
+                if child.is_file():
+                    try:
+                        freed += child.stat().st_size
+                    except OSError:
+                        pass
+            shutil.rmtree(session_dir, ignore_errors=True)
+        except OSError:
+            pass
+    return freed
 
 
 def _sweep_stale_segment_temps(max_age_seconds: int = 30) -> None:
@@ -224,6 +256,19 @@ def ensure_tmp_space(required_bytes: int | None, *, margin: float = 1.5) -> None
     except OSError:
         return
     if free < need:
+        try:
+            usage = shutil.disk_usage(tmpdir)
+            logger.warning(
+                "INSUFFICIENT_TMP_SPACE in %s: total %d MB, used %d MB, free %d MB "
+                "(need ~%d MB even after sweep)",
+                tmpdir,
+                usage.total // (1024 * 1024),
+                usage.used // (1024 * 1024),
+                usage.free // (1024 * 1024),
+                need // (1024 * 1024),
+            )
+        except OSError:
+            pass
         raise RuntimeError(
             f"INSUFFICIENT_TMP_SPACE: need ~{need // (1024 * 1024)} MB, "
             f"free {free // (1024 * 1024)} MB in {tmpdir}"

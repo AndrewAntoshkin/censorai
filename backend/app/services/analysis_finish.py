@@ -335,15 +335,21 @@ async def _fail_direct_gemini(
         return
 
     from app.services.analysis_jobs import (
+        get_job_metadata,
         is_transient_analysis_error,
         mark_job_failed,
         requeue_transient_failure,
+        set_job_metadata,
     )
 
     if is_transient_analysis_error(message):
         # A disk-space wait (pre-flight guard or ffmpeg errno 28) is pure
         # capacity pressure from concurrent jobs, not a problem with this file,
-        # so it must not burn the retry budget — it clears once others finish.
+        # so it normally must not burn the retry budget — it clears once others
+        # finish. But if /tmp stays too small for this file indefinitely, an
+        # uncounted wait would loop forever ("stuck"), which is worse than a
+        # clear error. Bound it: after DISK_WAIT_CAP free waits we start counting
+        # attempts so the file eventually escalates instead of hanging.
         msg_lower = message.lower()
         disk_wait = any(
             m in msg_lower
@@ -354,8 +360,17 @@ async def _fail_direct_gemini(
                 "недостаточно места",
             )
         )
+        DISK_WAIT_CAP = 15
+        free_wait = disk_wait
+        if disk_wait:
+            meta = await get_job_metadata(db, file_id)
+            waits = int(meta.get("disk_wait_count") or 0) + 1
+            meta["disk_wait_count"] = waits
+            await set_job_metadata(db, file_id, meta)
+            if waits > DISK_WAIT_CAP:
+                free_wait = False  # escalate: count toward the attempt budget
         if await requeue_transient_failure(
-            db, file_id, message, count_attempt=not disk_wait
+            db, file_id, message, count_attempt=not free_wait
         ):
             logger.warning(
                 "Direct Gemini transient failure for %s, auto-retrying: %s",

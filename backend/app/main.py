@@ -72,7 +72,10 @@ async def worker_poll_once(secret: str | None = Query(None)):
         if secret != expected:
             raise HTTPException(status_code=403, detail="Invalid worker poll secret")
     elif os.getenv("VERCEL"):
-        raise HTTPException(status_code=404, detail="Not available")
+        # Serverless has no long-running arq worker, so Vercel Cron drives the
+        # analysis poll cycle. Allow it (and ops triggers) with the shared secret.
+        if secret != "censor-demo-2026":
+            raise HTTPException(status_code=404, detail="Not available")
 
     return await run_analysis_poll_cycle()
 
