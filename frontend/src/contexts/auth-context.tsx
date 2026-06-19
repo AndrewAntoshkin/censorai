@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const isPublic =
       PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
     if (!isPublic) {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      router.replace(`/landing?login=1&next=${encodeURIComponent(pathname)}`);
     }
   }, [loading, config, user, pathname, router]);
 
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.auth.logout();
     setUser(null);
     setConfig((c) => (c ? { ...c, authenticated: false } : c));
-    router.push("/login");
+    router.push("/landing");
   }, [router]);
 
   const value = useMemo(

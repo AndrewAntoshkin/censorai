@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 
-export function ContactForm() {
+export function ContactForm({ className = "" }: { className?: string }) {
   const [form, setForm] = useState({ email: "", company: "", name: "", consent: false });
   const [status, setStatus] = useState<"idle" | "loading" | "success">("idle");
 
@@ -16,61 +16,54 @@ export function ContactForm() {
 
   if (status === "success") {
     return (
-      <div className="text-center py-8">
-        <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold text-white mb-2">
-          Заявка отправлена
-        </h3>
-        <p className="text-neutral-400 text-sm">
-          Мы свяжемся с вами в ближайшее время
-        </p>
+      <div className={`py-10 ${className}`}>
+        <CheckCircle2 className="mb-4 h-10 w-10 text-[var(--v7-orange-soft)]" />
+        <h3 className="mb-2 text-xl font-medium text-[var(--v7-white-warm)]">Заявка отправлена</h3>
+        <p className="text-sm text-[var(--v7-text-subtle)]">Мы свяжемся с вами в ближайшее время</p>
       </div>
     );
   }
 
+  const inputClass =
+    "w-full border-b border-[var(--v7-border)] bg-transparent py-3.5 text-sm text-[var(--v7-white-warm)] placeholder:text-[var(--v7-text-faint)] focus:border-[var(--v7-text-muted)] focus:outline-none";
+
   return (
-    <form onSubmit={handleSubmit} className="max-w-sm mx-auto space-y-4">
-      <div>
-        <input
-          type="text"
-          required
-          placeholder="Контактное лицо"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
-        />
-      </div>
-      <div>
-        <input
-          type="text"
-          required
-          placeholder="Название организации"
-          value={form.company}
-          onChange={(e) => setForm({ ...form, company: e.target.value })}
-          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
-        />
-      </div>
-      <div>
-        <input
-          type="email"
-          required
-          placeholder="Рабочая почта"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          className="w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
-        />
-      </div>
-      <label className="flex items-start gap-3 cursor-pointer">
+    <form onSubmit={handleSubmit} className={`w-full space-y-0 ${className}`}>
+      <input
+        type="text"
+        required
+        placeholder="Контактное лицо"
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+        className={inputClass}
+      />
+      <input
+        type="text"
+        required
+        placeholder="Название организации"
+        value={form.company}
+        onChange={(e) => setForm({ ...form, company: e.target.value })}
+        className={inputClass}
+      />
+      <input
+        type="email"
+        required
+        placeholder="Рабочая почта"
+        value={form.email}
+        onChange={(e) => setForm({ ...form, email: e.target.value })}
+        className={inputClass}
+      />
+      <label className="flex cursor-pointer items-start gap-3 border-b border-[var(--v7-border)] py-4">
         <input
           type="checkbox"
           required
           checked={form.consent}
           onChange={(e) => setForm({ ...form, consent: e.target.checked })}
-          className="mt-0.5 w-4 h-4 rounded border-white/20 bg-white/10 text-[#0048ff] focus:ring-[#0048ff]/30"
+          className="mt-0.5 h-4 w-4 rounded border-[var(--v7-border)] bg-transparent text-[var(--v7-orange)] focus:ring-[var(--v7-orange)]/30"
         />
-        <span className="text-xs text-neutral-400 leading-relaxed">
+        <span className="text-xs leading-relaxed text-[var(--v7-text-subtle)]">
           Даю согласие на{" "}
-          <span className="text-neutral-300 underline underline-offset-2">
+          <span className="text-[var(--v7-text-muted)] underline underline-offset-2">
             обработку персональных данных
           </span>{" "}
           в соответствии с 152-ФЗ
@@ -79,14 +72,14 @@ export function ContactForm() {
       <button
         type="submit"
         disabled={status === "loading" || !form.consent}
-        className="w-full inline-flex items-center justify-center gap-2 bg-white text-neutral-900 px-8 py-3.5 rounded-full text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-70"
+        className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[var(--v7-white)] px-8 py-3.5 text-sm font-medium text-[var(--v7-ink)] transition-colors hover:bg-[var(--v7-cream)] disabled:opacity-70 sm:w-auto"
       >
         {status === "loading" ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
+          <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <>
             Оставить заявку
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="h-4 w-4" />
           </>
         )}
       </button>
