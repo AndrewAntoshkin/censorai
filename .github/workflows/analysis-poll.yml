@@ -5,11 +5,16 @@ name: Analysis poll
 # is actively viewing stalls for hours ("stuck since yesterday"). This workflow
 # is the autonomous driver: it pokes the poll endpoint on a schedule so queued
 # segments keep finishing on their own.
+#
+# GitHub's scheduler is unreliable: a "*/5" cron is throttled and routinely
+# skipped for hours under load. To survive that, each run self-loops for ~58
+# minutes at 30s intervals, and `concurrency` + `cancel-in-progress: false`
+# makes the next scheduled run queue behind the active one and start the moment
+# it ends — giving near-continuous 30s polling even if the scheduler only fires
+# sporadically. This repo is public, so Actions minutes are free and unlimited.
 
 on:
   schedule:
-    # GitHub's minimum cron granularity is 5 min; each run self-loops at 30s
-    # intervals to cover the gap, giving ~30s effective polling.
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
@@ -20,14 +25,21 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
+    # Hard cap so a hung run cannot block the queued next run indefinitely.
+    timeout-minutes: 62
     steps:
-      - name: Drive analysis poll cycle
+      - name: Drive analysis poll cycle (~58 min of 30s ticks)
         run: |
           url="https://censorai.vercel.app/api/worker/poll-once?secret=censor-demo-2026"
-          for i in $(seq 1 9); do
+          # Stop a bit before timeout-minutes so the queued run can take over.
+          deadline=$(( SECONDS + 58*60 ))
+          tick=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            tick=$(( tick + 1 ))
             code=$(curl -s -o /tmp/poll_out -w "%{http_code}" --max-time 150 "$url" || echo "000")
-            echo "tick $i -> HTTP $code"
+            echo "tick $tick (t=${SECONDS}s) -> HTTP $code"
             head -c 400 /tmp/poll_out || true
             echo
-            [ "$i" -lt 9 ] && sleep 30 || true
+            sleep 30
           done
+          echo "Completed $tick ticks over ${SECONDS}s"
