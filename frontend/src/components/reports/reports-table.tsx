@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { FileStatusBadge } from "@/components/shared/file-status-badge";
 import { AddToProjectMenu } from "@/components/projects/add-to-project-menu";
+import { reportTypeLabel } from "@/lib/report-kind";
 
 const PAGE_SIZE = 10;
 
@@ -238,6 +239,9 @@ export function ReportsTable({
                   />
                 </th>
                 <th className="px-4 py-3 font-medium">Название</th>
+                <th className="hidden w-36 px-4 py-3 font-medium sm:table-cell">
+                  Тип
+                </th>
                 <th className="hidden w-28 px-4 py-3 font-medium md:table-cell">
                   Дата
                 </th>
@@ -249,7 +253,7 @@ export function ReportsTable({
               {pageItems.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-10 text-center text-sm text-muted-foreground"
                   >
                     Ничего не найдено
@@ -258,6 +262,8 @@ export function ReportsTable({
               ) : (
                 pageItems.map((file) => {
                   const isInProgress = WORKING_STATUSES.has((file.status || "").toLowerCase());
+                  const typeLabel = reportTypeLabel(file);
+                  const isPlacement = typeLabel === "Продакт плейсмент";
                   return (
                     <tr
                       key={file.id}
@@ -290,6 +296,18 @@ export function ReportsTable({
                             <span className="block min-w-0 truncate">{displayFileName(file.name)}</span>
                           </Link>
                         )}
+                      </td>
+                      <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                        <span
+                          className={cn(
+                            "inline-flex rounded-md px-2 py-0.5 text-xs",
+                            isPlacement
+                              ? "bg-primary/10 text-primary"
+                              : "text-foreground"
+                          )}
+                        >
+                          {typeLabel}
+                        </span>
                       </td>
                       <td className="hidden truncate px-4 py-3 text-muted-foreground md:table-cell">
                         {formatReportDate(file.created_at)}
