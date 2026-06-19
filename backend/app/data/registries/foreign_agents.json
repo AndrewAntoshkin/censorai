@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-06-01T15:55:10.749522+00:00",
+  "updated_at": "2026-06-19T09:08:28.418276+00:00",
   "source": "minjust_api",
   "official": "https://minjust.gov.ru/ru/pages/reestr-inostryannykh-agentov/",
-  "count": 962,
+  "count": 965,
   "entries": [
     {
       "id": "ca766a01-3f04-4500-a301-34ab13168fcd",
@@ -5692,17 +5692,6 @@
       "agentType": "Физические лица"
     },
     {
-      "id": "493104b0-27d6-4eba-bcb1-1c368b6d637b",
-      "fullName": "\"Общество с ограниченной ответственностью  «ЕЛКИН КАРТОН»",
-      "law": "Статья 9 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
-      "dateIn": "09.02.2024",
-      "dateOut": "",
-      "resources": "",
-      "members": "",
-      "address": "",
-      "agentType": "Юридические лица"
-    },
-    {
       "id": "27afed97-cc22-4735-a3ae-df2b11223035",
       "fullName": "Синеокая Юлия Вадимовна",
       "law": "Статья 7 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
@@ -10485,7 +10474,7 @@
       "resources": "https://earthtouches.me/; https://recyclemap.ru; https://t.me/s/earthtouches_me, ID: -1001003078795; https://vk.com/earthtouches_me; https://dzen.ru/earthtouches_me; https://www.instagram.com/earthtouches_me",
       "members": "[Романенко Наталья Игоревна, Куксин Григорий Валерьевич, Крейндлин Михаил Леонидович, Чупров Владимир Алексеевич, Киселёв Алексей, Ярошенко Алексей Юрьевич, Чалая Татьяна Викторовна, Давыдова Юлия Валерьевна, Доронина Анна Олеговна, Геренко Екатерина Андреевна, Кочемарова Арина, Викулова Олеся, Лупачик Вилен, Иванов Аркадий, Евтешина Антонина]",
       "address": "",
-      "agentType": "Иные объединения лиц"
+      "agentType": "Юридические лица"
     },
     {
       "id": "6ff0b6cf-f46e-9e55-94de-d82c9728d6e5",
@@ -10582,6 +10571,50 @@
       "dateIn": "29.05.2026",
       "dateOut": "",
       "resources": "https://t.me/HUhmuroeutro ID: -1001367972258; https://www.facebook.com/andrej.aleksandrovic.14; https://www.youtube.com/@andrei_nikulin; https://x.com/nikulin_aa; https://boosty.to/nikulin_aa; https://vk.com/nikulin_aa",
+      "members": "",
+      "address": "",
+      "agentType": "Физические лица"
+    },
+    {
+      "id": "a590a122-24da-2d05-bc27-d33d0e0e32d2",
+      "fullName": "Андрейчук Станислав Валерьевич",
+      "law": "Статья 7 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
+      "dateIn": "05.06.2026",
+      "dateOut": "",
+      "resources": "https://www.facebook.com/andreychuk.stanislav; https://t.me/sandreychuk, ID: -1001775497977; https://vk.com/id18616278",
+      "members": "",
+      "address": "",
+      "agentType": "Физические лица"
+    },
+    {
+      "id": "b4855694-61d5-612e-1af2-e8be8688f67b",
+      "fullName": "Маглов Михаил Михайлович",
+      "law": "Статья 7 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
+      "dateIn": "05.06.2026",
+      "dateOut": "",
+      "resources": "https://x.com/maglov; https://www.facebook.com/maglov2; https://www.linkedin.com/in/mikhail-maglov-206a6aa3/; https://vk.com/id4138896",
+      "members": "",
+      "address": "",
+      "agentType": "Физические лица"
+    },
+    {
+      "id": "c561ff63-f84f-3556-c1c6-dea37237c0ba",
+      "fullName": "Солдатских Виталий Андреевич",
+      "law": "Статья 7 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
+      "dateIn": "05.06.2026",
+      "dateOut": "",
+      "resources": "https://www.facebook.com/soldatskikh; https://ru.linkedin.com/in/vitalii-soldatskikh-229463102",
+      "members": "",
+      "address": "",
+      "agentType": "Физические лица"
+    },
+    {
+      "id": "a51d338b-c4f3-91de-6a57-a5c2d2d3052c",
+      "fullName": "Фролова Татьяна Владимировна",
+      "law": "Статья 7 Федерального закона от 14.07.2022 № 255-ФЗ «О контроле за деятельностью лиц, находящихся под иностранным влиянием»",
+      "dateIn": "05.06.2026",
+      "dateOut": "",
+      "resources": "https://www.instagram.com/tanya.forlove; https://www.youtube.com/@frolova_in_la",
       "members": "",
       "address": "",
       "agentType": "Физические лица"
