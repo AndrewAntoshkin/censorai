@@ -163,11 +163,11 @@ async def _run_direct_single(
             file_id,
         )
         result = build_full_review_result(
-            None, int(duration_seconds or 0), reason=str(exc)
+            None, int(duration_seconds or 0), reason=exc.user_message
         )
     except Exception as exc:
         logger.exception("Direct Gemini failed for file %s", file_id)
-        await _fail_direct_gemini_fresh(file_id, f"Direct Gemini: {exc}")
+        await _fail_direct_gemini_fresh(file_id, f"Analysis failed: {exc}")
         return
 
     async with async_session_factory() as s:
@@ -213,7 +213,7 @@ async def _run_direct_segment(
         # One segment refused by every model — skip it (deliver the rest) and
         # flag the range for manual review instead of failing the whole file.
         blocked = True
-        block_reason = str(exc)
+        block_reason = exc.user_message
         result = GeminiAnalysisResult()
         logger.warning(
             "Direct Gemini segment %d/%d blocked for %s; delivering partial",
@@ -226,7 +226,7 @@ async def _run_direct_segment(
             "Direct Gemini segment %d/%d failed for file %s", idx + 1, total, file_id
         )
         await _fail_direct_gemini_fresh(
-            file_id, f"Direct Gemini segment {idx + 1}/{total}: {exc}"
+            file_id, f"Segment {idx + 1}/{total} analysis failed: {exc}"
         )
         return
 

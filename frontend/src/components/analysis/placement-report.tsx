@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { Copy, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
+import { sanitizeUserText } from "@/lib/sanitize-user-text";
 import { cn } from "@/lib/utils";
 import type { AnalysisAPI, SceneAPI } from "@/lib/api";
 
@@ -93,14 +94,14 @@ function PlacementHitCard({ scene }: { scene: SceneAPI }) {
         </div>
 
         {scene.description && (
-          <p className="mb-2 text-sm text-foreground">{scene.description}</p>
+          <p className="mb-2 text-sm text-foreground">{sanitizeUserText(scene.description)}</p>
         )}
 
         <dl className="grid gap-2 text-sm">
           {scene.reason && (
             <>
               <dt className="text-muted-foreground">В кадре</dt>
-              <dd className="text-foreground">{scene.reason}</dd>
+              <dd className="text-foreground">{sanitizeUserText(scene.reason)}</dd>
             </>
           )}
           {scene.risk && (
@@ -122,7 +123,7 @@ function PlacementHitCard({ scene }: { scene: SceneAPI }) {
           {scene.quote && (
             <>
               <dt className="text-muted-foreground">Для монтажа</dt>
-              <dd className="text-foreground">{scene.quote}</dd>
+              <dd className="text-foreground">{sanitizeUserText(scene.quote)}</dd>
             </>
           )}
         </dl>

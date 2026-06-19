@@ -20,6 +20,7 @@ from app.core.filename import normalize_filename
 from app.models.analysis import Analysis, Scene
 from app.models.project import Project, VideoFile
 from app.services.access import apply_files_scope, require_project_access
+from app.services.user_messages import sanitize_user_error, sanitize_user_text
 from app.schemas.analysis import AnalysisResponse, GeminiAnalysisResult
 from app.schemas.project import (
     AssignProjectRequest,
@@ -269,7 +270,7 @@ async def _kickoff_analysis(
         video.replicate_prediction_id = None
         await mark_job_failed(db, video.id, str(exc))
         await db.flush()
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=sanitize_user_error(exc)) from exc
 
     video.replicate_prediction_id = prediction_id
     video.progress = 30
@@ -356,14 +357,14 @@ async def _save_analysis_result(
                 scene_number=gs.scene_number,
                 start_time=gs.start_time,
                 end_time=gs.end_time,
-                description=gs.description,
+                description=sanitize_user_text(gs.description),
                 risk=risk_item.risk,
                 mode=risk_item.mode,
                 risk_level=risk_item.risk_level,
                 probability=risk_item.probability,
-                reason=risk_item.reason,
-                quote=risk_item.quote,
-                text_in_frame=risk_item.text_in_frame,
+                reason=sanitize_user_text(risk_item.reason),
+                quote=sanitize_user_text(risk_item.quote),
+                text_in_frame=sanitize_user_text(risk_item.text_in_frame),
                 recommendation=risk_item.recommendation,
             )
             db.add(scene)
@@ -1462,7 +1463,7 @@ async def analyze_file(
         logger.exception("Failed to start analysis for file %s", file_id)
         video.status = "error"
         await db.flush()
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {e}") from e
+        raise HTTPException(status_code=500, detail=sanitize_user_error(e)) from e
 
     await db.commit()
 

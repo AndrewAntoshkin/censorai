@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.analysis_job import AnalysisJob, AnalysisJobStatus
 from app.models.project import VideoFile
+from app.services.user_messages import sanitize_user_error
 
 
 def _utc_naive_now() -> datetime:
@@ -133,7 +134,7 @@ async def requeue_transient_failure(
             video_file_id=video_file_id,
             status=AnalysisJobStatus.QUEUED.value,
             attempts=1,
-            last_error=f"Transient, will retry: {error[:1500]}",
+            last_error=sanitize_user_error(f"Transient, will retry: {error[:1500]}"),
         )
         db.add(job)
         await db.flush()
@@ -145,7 +146,7 @@ async def requeue_transient_failure(
     if count_attempt:
         job.attempts = attempts + 1
     job.status = AnalysisJobStatus.QUEUED.value
-    job.last_error = (
+    job.last_error = sanitize_user_error(
         f"Transient (attempt {job.attempts}/{max_attempts}), auto-retry: {error[:1500]}"
     )
     await db.flush()
@@ -162,12 +163,12 @@ async def mark_job_failed(db: AsyncSession, video_file_id: str, error: str) -> N
             video_file_id=video_file_id,
             status=AnalysisJobStatus.FAILED.value,
             attempts=1,
-            last_error=error[:2000],
+            last_error=sanitize_user_error(error),
         )
         db.add(job)
     else:
         job.status = AnalysisJobStatus.FAILED.value
-        job.last_error = error[:2000]
+        job.last_error = sanitize_user_error(error)
     await db.flush()
 
 

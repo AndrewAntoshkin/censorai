@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ArrowLeft, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { sanitizeUserText } from "@/lib/sanitize-user-text";
 import { cn } from "@/lib/utils";
 import { riskLevelStyle } from "@/lib/risk";
 import { api, type AnalysisAPI, type SceneAPI } from "@/lib/api";
@@ -117,7 +118,7 @@ function AgeRatingRecommendation({
         </p>
       )}
       {summary.age_rating_reason && (
-        <p className="mt-2 text-sm text-foreground">{summary.age_rating_reason}</p>
+        <p className="mt-2 text-sm text-foreground">{sanitizeUserText(summary.age_rating_reason)}</p>
       )}
       <p className="mt-3 text-xs text-muted-foreground">
         Не юридический вердикт — требует проверки редактором
@@ -130,7 +131,7 @@ function AgeRatingRecommendation({
                 Сцена {t.scene_number ?? "?"} ({t.start_time ?? "?"}):
               </span>{" "}
               {RISK_LABELS[t.trigger ?? ""] || t.trigger}
-              {t.reason ? ` — ${t.reason}` : ""}
+              {t.reason ? ` — ${sanitizeUserText(t.reason)}` : ""}
             </li>
           ))}
         </ul>
@@ -174,11 +175,11 @@ function SceneCard({ scene }: { scene: SceneAPI }) {
 
           {scene.quote && (
             <DetailRow label="Фрагмент диалога">
-              <span className="italic text-muted-foreground">«{scene.quote}»</span>
+              <span className="italic text-muted-foreground">«{sanitizeUserText(scene.quote)}»</span>
             </DetailRow>
           )}
 
-          <DetailRow label="Описание сцены">{scene.description || "—"}</DetailRow>
+          <DetailRow label="Описание сцены">{sanitizeUserText(scene.description) || "—"}</DetailRow>
 
           {scene.text_in_frame && (
             <DetailRow label="Текст в кадре">{scene.text_in_frame}</DetailRow>
@@ -200,7 +201,9 @@ function SceneCard({ scene }: { scene: SceneAPI }) {
             </DetailRow>
           )}
 
-          {scene.reason && <DetailRow label="Основание">{scene.reason}</DetailRow>}
+          {scene.reason && (
+            <DetailRow label="Основание">{sanitizeUserText(scene.reason)}</DetailRow>
+          )}
         </dl>
       </div>
     </div>

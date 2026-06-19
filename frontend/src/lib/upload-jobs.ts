@@ -179,7 +179,7 @@ async function runJob(jobId: string) {
       patchJob(jobId, {
         status: "analyzing",
         progress: 10,
-        statusHint: "Отправка в Replicate…",
+        statusHint: "Отправка на анализ…",
       });
     }
 

@@ -43,7 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Готов к загрузке",
   uploading: "Загрузка…",
   uploaded: "Загружено, запуск…",
-  analyzing: "Анализ через Gemini · 5–20 мин для длинных видео",
+  analyzing: "Анализ видео · 5–20 мин для длинных роликов",
   done: "Готово",
   error: "Ошибка",
 };
