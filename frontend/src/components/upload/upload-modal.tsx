@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
-import { Upload, X, FileVideo, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, X, FileVideo, CheckCircle, AlertCircle, Loader2, Shield, Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +11,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { cn, displayFileName } from "@/lib/utils";
+import type { UploadReportKind } from "@/lib/upload-api";
 import {
   MAX_CONCURRENT_UPLOADS,
   addPendingUploadJobs,
@@ -22,6 +24,7 @@ import {
   removePendingUploadJob,
   startUploadBatch,
   subscribeUploadJobs,
+  updatePendingJobsUploadOptions,
   type UploadJob,
 } from "@/lib/upload-jobs";
 
@@ -39,14 +42,16 @@ function formatFileSize(bytes: number): string {
 const STATUS_LABELS: Record<string, string> = {
   pending: "Готов к загрузке",
   uploading: "Загрузка…",
-  uploaded: "Загружено, запуск анализа…",
+  uploaded: "Загружено, запуск…",
   analyzing: "Анализ через Gemini · 5–20 мин для длинных видео",
-  done: "Анализ завершён",
+  done: "Готово",
   error: "Ошибка",
 };
 
 export function UploadModal({ open, onOpenChange }: UploadModalProps) {
   const router = useRouter();
+  const [uploadMode, setUploadMode] = useState<UploadReportKind>("moderation");
+  const [placementQuery, setPlacementQuery] = useState("");
 
   const jobs = useSyncExternalStore(
     subscribeUploadJobs,
@@ -54,9 +59,15 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
     getUploadJobsSnapshot
   );
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    addPendingUploadJobs(acceptedFiles);
-  }, []);
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      addPendingUploadJobs(acceptedFiles, {
+        reportKind: uploadMode,
+        placementQuery: uploadMode === "placement" ? placementQuery : undefined,
+      });
+    },
+    [uploadMode, placementQuery]
+  );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -74,14 +85,27 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
   const allTerminal =
     jobs.length > 0 && jobs.every((j) => j.status === "done" || j.status === "error");
 
+  const placementValid = uploadMode !== "placement" || placementQuery.trim().length >= 2;
+
   const uploadAndAnalyze = () => {
+    if (!placementValid) return;
+    updatePendingJobsUploadOptions({
+      reportKind: uploadMode,
+      placementQuery: placementQuery.trim(),
+    });
     const ids = pendingJobs.map((j) => j.id);
     startUploadBatch(ids);
   };
 
   const handleClose = (isOpen: boolean) => {
+    if (!isOpen) {
+      setPlacementQuery("");
+      setUploadMode("moderation");
+    }
     onOpenChange(isOpen);
   };
+
+  const isPlacement = uploadMode === "placement";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -95,6 +119,41 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
             </p>
           )}
         </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-2">
+          <ModeButton
+            active={uploadMode === "moderation"}
+            onClick={() => setUploadMode("moderation")}
+            icon={<Shield className="h-4 w-4" />}
+            title="Анализ"
+            description="Модерация и риски"
+          />
+          <ModeButton
+            active={uploadMode === "placement"}
+            onClick={() => setUploadMode("placement")}
+            icon={<Sparkles className="h-4 w-4" />}
+            title="Продакт плейсмент"
+            description="Слоты для рекламы"
+          />
+        </div>
+
+        {isPlacement && (
+          <div className="space-y-1.5">
+            <label htmlFor="placement-query" className="text-sm font-medium text-foreground">
+              Что размещаем в кадре
+            </label>
+            <Input
+              id="placement-query"
+              value={placementQuery}
+              onChange={(e) => setPlacementQuery(e.target.value)}
+              placeholder="Например: бутылка, смартфон, чашка"
+              className="h-10"
+            />
+            <p className="text-xs text-muted-foreground">
+              Найдём моменты, куда можно нативно вставить предмет в монтаже
+            </p>
+          </div>
+        )}
 
         <div
           {...getRootProps()}
@@ -122,13 +181,6 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
                 <p className="text-xs text-muted-foreground">
                   MP4, AVI, MKV, MOV, WMV до 500 МБ · до {MAX_CONCURRENT_UPLOADS} одновременно
                 </p>
-                {typeof window !== "undefined" &&
-                  (window.location.hostname === "localhost" ||
-                    window.location.hostname === "127.0.0.1") && (
-                    <p className="text-xs text-muted-foreground">
-                      Локально &gt;4 МБ: BLOB_READ_WRITE_TOKEN в backend/.env.secrets
-                    </p>
-                  )}
               </>
             )}
           </div>
@@ -165,12 +217,14 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
             </Button>
           )}
           {pendingJobs.length > 0 && (
-            <Button onClick={uploadAndAnalyze} size="lg">
+            <Button onClick={uploadAndAnalyze} size="lg" disabled={!placementValid}>
               {hasActive ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   В очереди ({pendingJobs.length})
                 </>
+              ) : isPlacement ? (
+                `Найти слоты (${pendingJobs.length})`
               ) : (
                 `Загрузить и анализировать (${pendingJobs.length})`
               )}
@@ -182,6 +236,39 @@ export function UploadModal({ open, onOpenChange }: UploadModalProps) {
   );
 }
 
+function ModeButton({
+  active,
+  onClick,
+  icon,
+  title,
+  description,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors",
+        active
+          ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+          : "border-border hover:border-primary/30 hover:bg-accent"
+      )}
+    >
+      <span className={cn("flex items-center gap-2 text-sm font-medium", active && "text-primary")}>
+        {icon}
+        {title}
+      </span>
+      <span className="text-xs text-muted-foreground">{description}</span>
+    </button>
+  );
+}
+
 function JobRow({
   uploadJob,
   onRemove,
@@ -189,11 +276,19 @@ function JobRow({
   uploadJob: UploadJob;
   onRemove: () => void;
 }) {
+  const isPlacement = uploadJob.reportKind === "placement";
+  const statusLabel =
+    uploadJob.status === "analyzing" && isPlacement
+      ? "Поиск слотов · 5–20 мин для длинных видео"
+      : uploadJob.status === "done" && isPlacement
+        ? "Отчёт готов"
+        : STATUS_LABELS[uploadJob.status];
+
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
       <FileVideo className="h-5 w-5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center justify-between">
+        <div className="mb-1 flex items-center justify-between gap-2">
           <p className="truncate text-sm font-medium text-foreground">
             {displayFileName(uploadJob.file.name)}
           </p>
@@ -201,31 +296,36 @@ function JobRow({
             {formatFileSize(uploadJob.file.size)}
           </span>
         </div>
+        {isPlacement && uploadJob.placementQuery && (
+          <p className="mb-1 truncate text-xs text-muted-foreground">
+            Поиск: «{uploadJob.placementQuery}»
+          </p>
+        )}
         {(uploadJob.status === "uploading" || uploadJob.status === "analyzing") && (
           <div className="space-y-1">
             <Progress value={uploadJob.progress} className="h-1.5" />
             <div className="flex items-center gap-1.5 text-xs text-primary">
               <Loader2 className="h-3 w-3 animate-spin" />
-              {uploadJob.statusHint || STATUS_LABELS[uploadJob.status]}
+              {uploadJob.statusHint || statusLabel}
             </div>
           </div>
         )}
         {uploadJob.status === "uploaded" && (
           <div className="flex items-center gap-1.5 text-xs text-primary">
             <Loader2 className="h-3 w-3 animate-spin" />
-            {STATUS_LABELS[uploadJob.status]}
+            {statusLabel}
           </div>
         )}
         {uploadJob.status === "done" && (
           <div className="flex items-center gap-1 text-xs text-success">
             <CheckCircle className="h-3 w-3" />
-            {STATUS_LABELS[uploadJob.status]}
+            {statusLabel}
           </div>
         )}
         {uploadJob.status === "error" && (
           <div className="flex items-center gap-1 text-xs text-critical">
             <AlertCircle className="h-3 w-3" />
-            {uploadJob.error || STATUS_LABELS[uploadJob.status]}
+            {uploadJob.error || statusLabel}
           </div>
         )}
       </div>

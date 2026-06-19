@@ -72,6 +72,17 @@ def _migrate_columns() -> None:
                     )
                 )
                 logger.info("Added video_files.analysis_attempts column")
+            if "report_kind" not in video_cols:
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE video_files ADD COLUMN report_kind VARCHAR(32) "
+                        "NOT NULL DEFAULT 'moderation'"
+                    )
+                )
+                logger.info("Added video_files.report_kind column")
+            if "placement_query" not in video_cols:
+                conn.execute(sa.text("ALTER TABLE video_files ADD COLUMN placement_query VARCHAR(256)"))
+                logger.info("Added video_files.placement_query column")
 
             project_cols = {
                 row[1] for row in conn.execute(sa.text("PRAGMA table_info(projects)"))
@@ -174,6 +185,18 @@ def _migrate_columns() -> None:
             conn.execute(
                 sa.text(
                     "ALTER TABLE analysis_jobs ADD COLUMN IF NOT EXISTS job_metadata TEXT"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE video_files ADD COLUMN IF NOT EXISTS "
+                    "report_kind VARCHAR(32) NOT NULL DEFAULT 'moderation'"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE video_files ADD COLUMN IF NOT EXISTS "
+                    "placement_query VARCHAR(256)"
                 )
             )
             logger.info(

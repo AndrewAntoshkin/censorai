@@ -31,6 +31,7 @@ def start_analysis(
     file_size: int | None = None,
     expected_duration_seconds: int | None = None,
     extra_prompt_suffix: str = "",
+    prompt_override: str | None = None,
 ) -> str:
     return gemini_service.start_analysis(
         storage_path,
@@ -38,6 +39,7 @@ def start_analysis(
         file_size=file_size,
         expected_duration_seconds=expected_duration_seconds,
         extra_prompt_suffix=extra_prompt_suffix,
+        prompt_override=prompt_override,
     )
 
 

@@ -192,7 +192,11 @@ class GeminiService:
         *,
         expected_duration_seconds: int | None = None,
         extra_prompt_suffix: str = "",
+        prompt_override: str | None = None,
     ) -> str:
+        base = (prompt_override or "").strip()
+        if base:
+            return base + (extra_prompt_suffix or "")
         return (
             ANALYSIS_PROMPT
             + full_coverage_prompt_suffix(expected_duration_seconds)
@@ -219,9 +223,10 @@ class GeminiService:
 
         genai.configure(api_key=api_key)
         model_slugs = self._fallback_model_slugs(model_name)
-        prompt = (prompt_override or "").strip() or self._build_analysis_prompt(
+        prompt = self._build_analysis_prompt(
             expected_duration_seconds=expected_duration_seconds,
             extra_prompt_suffix=extra_prompt_suffix,
+            prompt_override=prompt_override,
         )
 
         video_uri = self.resolve_video_uri(
@@ -286,6 +291,7 @@ class GeminiService:
         expected_duration_seconds: int | None = None,
         extra_prompt_suffix: str = "",
         model_name: str | None = None,
+        prompt_override: str | None = None,
     ) -> GeminiAnalysisResult:
         """Run direct Gemini on an already-local file (e.g. a cut segment).
 
@@ -301,6 +307,7 @@ class GeminiService:
         prompt = self._build_analysis_prompt(
             expected_duration_seconds=expected_duration_seconds,
             extra_prompt_suffix=extra_prompt_suffix,
+            prompt_override=prompt_override,
         )
         mime = mimetypes.guess_type(local_path)[0] or "video/mp4"
         return self._direct_generate_from_path(
@@ -417,10 +424,12 @@ class GeminiService:
         *,
         expected_duration_seconds: int | None = None,
         extra_prompt_suffix: str = "",
+        prompt_override: str | None = None,
     ) -> dict:
         prompt = self._build_analysis_prompt(
             expected_duration_seconds=expected_duration_seconds,
             extra_prompt_suffix=extra_prompt_suffix,
+            prompt_override=prompt_override,
         )
         payload = {
             "prompt": prompt,
@@ -441,6 +450,7 @@ class GeminiService:
         file_size: int | None = None,
         expected_duration_seconds: int | None = None,
         extra_prompt_suffix: str = "",
+        prompt_override: str | None = None,
     ) -> str:
         """Start Replicate prediction without blocking (for serverless)."""
         video_uri = self.resolve_video_uri(
@@ -452,6 +462,7 @@ class GeminiService:
                 video_uri,
                 expected_duration_seconds=expected_duration_seconds,
                 extra_prompt_suffix=extra_prompt_suffix,
+                prompt_override=prompt_override,
             ),
         )
         return prediction.id
@@ -579,6 +590,11 @@ class GeminiService:
         except json.JSONDecodeError:
             logger.warning("Direct JSON parse failed, trying to repair truncated JSON...")
             data = self._repair_truncated_json(cleaned)
+
+        if isinstance(data, dict) and "hits" in data:
+            from app.services.placement_analysis import placement_json_to_gemini_result
+
+            return placement_json_to_gemini_result(data)
 
         if isinstance(data, dict):
             data = self._normalize_parsed_data(data)

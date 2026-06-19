@@ -53,6 +53,7 @@ async def prepare_segmented_job(
     *,
     total_seconds: int,
     extra_prompt_suffix: str = "",
+    prompt_override: str | None = None,
 ) -> dict:
     """Plan segment ranges only — cutting happens lazily, one segment per request.
 
@@ -73,6 +74,7 @@ async def prepare_segmented_job(
         "current_index": 0,
         "partial_results": [],
         "extra_prompt_suffix": extra_prompt_suffix,
+        "prompt_override": prompt_override,
     }
     await set_job_metadata(db, video.id, metadata)
     logger.info(
@@ -193,6 +195,7 @@ async def start_segment_prediction(
         file_size=None,
         expected_duration_seconds=duration_sec,
         extra_prompt_suffix=extra,
+        prompt_override=metadata.get("prompt_override"),
     )
     metadata["current_index"] = index
     await set_job_metadata(db, video.id, metadata)

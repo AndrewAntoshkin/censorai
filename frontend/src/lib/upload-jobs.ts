@@ -1,4 +1,4 @@
-import { uploadFileToProject, waitForAnalysis } from "@/lib/upload-api";
+import { uploadFileToProject, waitForAnalysis, type UploadOptions } from "@/lib/upload-api";
 
 export const MAX_CONCURRENT_UPLOADS = 3;
 
@@ -10,6 +10,8 @@ export type UploadJobStatus =
   | "done"
   | "error";
 
+export type UploadReportKind = UploadOptions["reportKind"];
+
 export interface UploadJob {
   id: string;
   file: File;
@@ -19,6 +21,8 @@ export interface UploadJob {
   error?: string;
   fileId?: string;
   projectId?: string;
+  reportKind?: UploadReportKind;
+  placementQuery?: string;
   /** Toast «Отчёт готов» already dismissed — never show it again. */
   notified?: boolean;
 }
@@ -73,12 +77,17 @@ export function hasBackgroundUploadJobs(): boolean {
   );
 }
 
-export function addPendingUploadJobs(files: File[]): void {
+export function addPendingUploadJobs(
+  files: File[],
+  options?: UploadOptions
+): void {
   const newJobs: UploadJob[] = files.map((file) => ({
     id: crypto.randomUUID(),
     file,
     progress: 0,
     status: "pending",
+    reportKind: options?.reportKind ?? "moderation",
+    placementQuery: options?.placementQuery,
   }));
   jobs = [...jobs, ...newJobs];
   notify();
@@ -139,7 +148,11 @@ async function runJob(jobId: string) {
     const uploadedFile = await uploadFileToProject(
       job.file,
       job.projectId,
-      (progress, hint) => patchJob(jobId, { progress, statusHint: hint })
+      (progress, hint) => patchJob(jobId, { progress, statusHint: hint }),
+      {
+        reportKind: job.reportKind,
+        placementQuery: job.placementQuery,
+      }
     );
 
     if (uploadedFile.status === "analyzed") {
@@ -193,6 +206,19 @@ async function runJob(jobId: string) {
     const message = err instanceof Error ? err.message : "Unknown error";
     patchJob(jobId, { status: "error", error: message });
   }
+}
+
+export function updatePendingJobsUploadOptions(options: UploadOptions): void {
+  jobs = jobs.map((j) =>
+    j.status === "pending"
+      ? {
+          ...j,
+          reportKind: options.reportKind ?? j.reportKind,
+          placementQuery: options.placementQuery ?? j.placementQuery,
+        }
+      : j
+  );
+  notify();
 }
 
 /** Start pending jobs (optional shared project for the whole batch). */

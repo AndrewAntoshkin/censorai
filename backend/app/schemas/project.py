@@ -47,6 +47,8 @@ class VideoFileResponse(BaseModel):
     storage_path: str | None = None
     analysis_id: str | None = None
     analysis: AnalysisBrief | None = None
+    report_kind: str = "moderation"
+    placement_query: str | None = None
     created_at: datetime
     updated_at: datetime
 

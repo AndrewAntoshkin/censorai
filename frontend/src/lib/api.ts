@@ -133,6 +133,11 @@ function demoRequest<T>(path: string, options?: RequestInit): T {
 }
 
 export interface AnalysisSummaryAPI {
+  report_kind?: "moderation" | "placement";
+  placement_query?: string;
+  total_hits?: number;
+  high_suitability_count?: number;
+  medium_suitability_count?: number;
   total_scenes: number;
   risky_scenes: number;
   review_count?: number;
@@ -240,6 +245,8 @@ export interface VideoFileAPI {
   storage_path: string | null;
   analysis_id: string | null;
   analysis?: AnalysisBriefAPI | null;
+  report_kind?: "moderation" | "placement";
+  placement_query?: string | null;
   created_at: string;
 }
 

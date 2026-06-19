@@ -31,6 +31,7 @@ async def setup_direct_analysis(
     *,
     total_seconds: int | None,
     extra_prompt_suffix: str = "",
+    prompt_override: str | None = None,
 ) -> None:
     """Mark a file for direct Gemini; plan segments when the video is long."""
     from app.services.analysis_jobs import set_job_metadata
@@ -60,6 +61,7 @@ async def setup_direct_analysis(
             "current_index": 0,
             "partial_results": [],
             "extra_prompt_suffix": extra_prompt_suffix,
+            "prompt_override": prompt_override,
         }
         await set_job_metadata(db, video.id, metadata)
         logger.info(
@@ -84,6 +86,7 @@ def run_direct_segment_sync(
     index: int,
     total: int,
     extra_prompt_suffix: str = "",
+    prompt_override: str | None = None,
 ) -> GeminiAnalysisResult:
     """Cut one segment to a local temp and analyze it via direct Gemini."""
     from app.services.gemini_service import gemini_service
@@ -103,6 +106,7 @@ def run_direct_segment_sync(
             local_path,
             expected_duration_seconds=duration_sec,
             extra_prompt_suffix=extra,
+            prompt_override=prompt_override,
         )
     finally:
         for path in temps:

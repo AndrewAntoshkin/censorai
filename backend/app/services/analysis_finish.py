@@ -135,6 +135,14 @@ async def _run_direct_single(
 ) -> None:
     from app.services.analysis_coverage import expected_duration_seconds
     from app.services.gemini_service import gemini_service
+    from app.services.placement_analysis import placement_prompt_for_video
+
+    prompt_override = None
+    async with async_session_factory() as s:
+        row = await s.execute(select(VideoFile).where(VideoFile.id == file_id))
+        locked = row.scalar_one_or_none()
+        if locked:
+            prompt_override = placement_prompt_for_video(locked)
 
     try:
         result = await asyncio.to_thread(
@@ -145,6 +153,7 @@ async def _run_direct_single(
             expected_duration_seconds=expected_duration_seconds(
                 file_size or 0, duration_seconds
             ),
+            prompt_override=prompt_override,
         )
     except ContentBlockedError as exc:
         # Whole file refused by every model — still deliver an openable report
@@ -198,6 +207,7 @@ async def _run_direct_segment(
             index=idx,
             total=total,
             extra_prompt_suffix=metadata.get("extra_prompt_suffix", ""),
+            prompt_override=metadata.get("prompt_override"),
         )
     except ContentBlockedError as exc:
         # One segment refused by every model — skip it (deliver the rest) and

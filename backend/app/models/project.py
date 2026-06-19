@@ -65,6 +65,8 @@ class VideoFile(Base):
     duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
     analysis_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     analysis_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("analyses.id", ondelete="SET NULL"), nullable=True)
+    report_kind: Mapped[str] = mapped_column(String(32), default="moderation", nullable=False)
+    placement_query: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

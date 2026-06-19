@@ -99,6 +99,21 @@ def _expected_duration(video: VideoFile) -> int | None:
     return expected_duration_seconds(video.size or 0, video.duration_seconds)
 
 
+def _validate_upload_analysis_params(
+    report_kind: str,
+    placement_query: str | None,
+) -> tuple[str, str | None]:
+    kind = (report_kind or "moderation").strip().lower()
+    if kind not in {"moderation", "placement"}:
+        raise HTTPException(status_code=400, detail="Invalid report_kind")
+    query = (placement_query or "").strip() if kind == "placement" else None
+    if kind == "placement" and len(query or "") < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="placement_query is required (min 2 characters) for product placement",
+        )
+    return kind, query
+
 async def _cascade_prompt_suffix(video: VideoFile) -> str:
     if not settings.ANALYSIS_CASCADE_ENABLED:
         return ""
@@ -185,6 +200,7 @@ async def _kickoff_analysis(
         should_segment,
         start_segment_prediction,
     )
+    from app.services.placement_analysis import placement_prompt_for_video
 
     if use_direct:
         from app.services.analysis_coverage import estimate_duration_seconds
@@ -196,7 +212,11 @@ async def _kickoff_analysis(
             video.duration_seconds = float(total_seconds)
             await db.flush()
         await setup_direct_analysis(
-            db, video, total_seconds=total_seconds, extra_prompt_suffix=""
+            db,
+            video,
+            total_seconds=total_seconds,
+            extra_prompt_suffix="",
+            prompt_override=placement_prompt_for_video(video),
         )
         await ensure_processing_job(db, video.id)
         return
@@ -206,6 +226,7 @@ async def _kickoff_analysis(
         video.duration_seconds = float(total_seconds)
         await db.flush()
     extra_prompt = await _cascade_prompt_suffix(video) if not do_segment else ""
+    prompt_override = placement_prompt_for_video(video, extra_prompt_suffix=extra_prompt)
 
     try:
         if do_segment and total_seconds:
@@ -214,6 +235,7 @@ async def _kickoff_analysis(
                 db,
                 total_seconds=total_seconds,
                 extra_prompt_suffix=extra_prompt,
+                prompt_override=prompt_override,
             )
             prediction_id = await start_segment_prediction(video, db, metadata, 0)
             video.progress = 28
@@ -226,6 +248,7 @@ async def _kickoff_analysis(
                 file_size=video.size,
                 expected_duration_seconds=_expected_duration(video),
                 extra_prompt_suffix=extra_prompt,
+                prompt_override=prompt_override,
             )
     except HTTPException:
         raise
@@ -284,6 +307,9 @@ async def _maybe_finish_analysis(video: VideoFile, db: AsyncSession) -> None:
 async def _save_analysis_result(
     video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
 ) -> Analysis | None:
+    if video.report_kind == "placement":
+        return await _save_placement_result(video, db, gemini_result)
+
     from app.services.analysis_errors import is_review_result
 
     expected = _expected_duration(video)
@@ -360,12 +386,72 @@ async def _save_analysis_result(
     return analysis
 
 
+async def _save_placement_result(
+    video: VideoFile, db: AsyncSession, gemini_result: GeminiAnalysisResult
+) -> Analysis:
+    from app.services.placement_analysis import build_placement_summary
+
+    summary = build_placement_summary(
+        gemini_result,
+        placement_query=video.placement_query or "",
+    )
+    analysis = Analysis(
+        video_file_id=video.id,
+        video_title=gemini_result.video_title or video.name,
+        duration=gemini_result.duration,
+        analyzed_at=_utc_naive_now(),
+        status="completed",
+    )
+    analysis.summary = summary
+    db.add(analysis)
+    await db.flush()
+    await db.refresh(analysis)
+
+    for gs in gemini_result.scenes:
+        if not gs.risks:
+            continue
+        for risk_item in gs.risks:
+            scene = Scene(
+                analysis_id=analysis.id,
+                scene_number=gs.scene_number,
+                start_time=gs.start_time,
+                end_time=gs.end_time,
+                description=gs.description,
+                risk=risk_item.risk,
+                mode=risk_item.mode,
+                risk_level=risk_item.risk_level,
+                probability=risk_item.probability,
+                reason=risk_item.reason,
+                quote=risk_item.quote,
+            )
+            db.add(scene)
+
+    video.status = "analyzed"
+    video.progress = 100
+    video.analysis_id = analysis.id
+    video.replicate_prediction_id = None
+    await db.flush()
+
+    from app.services.analysis_jobs import mark_job_completed
+
+    await mark_job_completed(db, video.id)
+
+    blob_path = video.storage_path
+    if await asyncio.to_thread(release_video_blob, blob_path):
+        video.storage_path = None
+        await db.flush()
+
+    return analysis
+
+
 @router.post("/upload", response_model=VideoFileResponse, status_code=201)
 async def upload_file(
     file: UploadFile,
     project_id: str | None = Query(None),
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
+    report_kind: str = Query("moderation"),
+    placement_query: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
@@ -397,6 +483,7 @@ async def upload_file(
     )
 
     safe_name = normalize_filename(file.filename)
+    kind, query = _validate_upload_analysis_params(report_kind, placement_query)
     video = VideoFile(
         name=safe_name,
         size=len(content),
@@ -405,6 +492,8 @@ async def upload_file(
         project_id=resolved_project_id,
         folder_id=folder_id,
         storage_path=storage_path,
+        report_kind=kind,
+        placement_query=query,
     )
     db.add(video)
     await db.flush()
@@ -927,6 +1016,8 @@ async def upload_chunk(session_id: str, part: int, request: Request):
 async def complete_chunk_upload(
     session_id: str,
     auto_analyze: bool = Query(False),
+    report_kind: str = Query("moderation"),
+    placement_query: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
@@ -949,6 +1040,7 @@ async def complete_chunk_upload(
     if not is_chunk_session_path(storage_path):
         cleanup_session(session_id)
 
+    kind, query = _validate_upload_analysis_params(report_kind, placement_query)
     video = VideoFile(
         name=session.filename,
         size=session.size,
@@ -958,6 +1050,8 @@ async def complete_chunk_upload(
         folder_id=session.folder_id,
         storage_path=storage_path,
         duration_seconds=session.duration_seconds,
+        report_kind=kind,
+        placement_query=query,
     )
     db.add(video)
     await db.flush()
@@ -1126,6 +1220,8 @@ async def register_from_blob(
     project_id: str | None = Query(None),
     folder_id: str | None = None,
     auto_analyze: bool = Query(False),
+    report_kind: str = Query("moderation"),
+    placement_query: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     auth: CurrentAuth | None = Depends(require_auth_if_enabled),
 ):
@@ -1149,6 +1245,7 @@ async def register_from_blob(
         )
 
     storage_path = _resolve_storage_path(data)
+    kind, query = _validate_upload_analysis_params(report_kind, placement_query)
 
     video = VideoFile(
         name=normalize_filename(data.filename),
@@ -1159,6 +1256,8 @@ async def register_from_blob(
         folder_id=folder_id,
         storage_path=storage_path,
         duration_seconds=data.duration_seconds,
+        report_kind=kind,
+        placement_query=query,
     )
     db.add(video)
     await db.flush()

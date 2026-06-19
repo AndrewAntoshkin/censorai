@@ -91,22 +91,36 @@ async function blobStorageWritable(): Promise<boolean> {
   }
 }
 
-function uploadQuery(projectId?: string | null, extra?: Record<string, string>): string {
-  const params = new URLSearchParams({ auto_analyze: "1", ...extra });
+function uploadQuery(projectId?: string | null, options?: UploadOptions): string {
+  const params = new URLSearchParams({ auto_analyze: "1" });
   if (projectId) params.set("project_id", projectId);
+  if (options?.reportKind === "placement") {
+    params.set("report_kind", "placement");
+    if (options.placementQuery?.trim()) {
+      params.set("placement_query", options.placementQuery.trim());
+    }
+  }
   return params.toString();
+}
+
+export type UploadReportKind = "moderation" | "placement";
+
+export interface UploadOptions {
+  reportKind?: UploadReportKind;
+  placementQuery?: string;
 }
 
 async function uploadViaDirectPost(
   file: File,
   projectId: string | undefined,
-  onProgress: (progress: number, hint?: string) => void
+  onProgress: (progress: number, hint?: string) => void,
+  options?: UploadOptions
 ): Promise<VideoFileAPI> {
   onProgress(5, "Загрузка на сервер…");
   const formData = new FormData();
   formData.append("file", file);
   const uploadRes = await apiFetch(
-    `${getApiBase()}/api/files/upload?${uploadQuery(projectId)}`,
+    `${getApiBase()}/api/files/upload?${uploadQuery(projectId, options)}`,
     { method: "POST", body: formData }
   );
   if (!uploadRes.ok) {
@@ -295,7 +309,8 @@ async function registerStorageAndAnalyze(
   file: File,
   projectId: string | undefined,
   storagePath: string,
-  onProgress: (progress: number, hint?: string) => void
+  onProgress: (progress: number, hint?: string) => void,
+  options?: UploadOptions
 ): Promise<VideoFileAPI> {
   onProgress(88, "Проверка длительности…");
   const durationSeconds = await readVideoDurationSeconds(file);
@@ -311,7 +326,7 @@ async function registerStorageAndAnalyze(
     body.blob_url = storagePath;
   }
   const res = await apiFetch(
-    `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId)}`,
+    `${getApiBase()}/api/files/from-blob?${uploadQuery(projectId, options)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -415,7 +430,8 @@ function uploadViaS3Presigned(
 async function uploadViaChunks(
   file: File,
   projectId: string | undefined,
-  onProgress: (progress: number, hint?: string) => void
+  onProgress: (progress: number, hint?: string) => void,
+  options?: UploadOptions
 ): Promise<VideoFileAPI> {
   const totalParts = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
 
@@ -470,7 +486,7 @@ async function uploadViaChunks(
 
   onProgress(90, "Сборка файла и запуск анализа…");
   const completeRes = await apiFetch(
-    `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?auto_analyze=1`,
+    `${getApiBase()}/api/files/upload-chunks/${sessionId}/complete?${uploadQuery(projectId, options)}`,
     { method: "POST" }
   );
   if (!completeRes.ok) {
@@ -489,7 +505,8 @@ function canFallbackToChunks(file: File): boolean {
 export async function uploadFileToProject(
   file: File,
   projectId: string | undefined,
-  onProgress: (progress: number, hint?: string) => void
+  onProgress: (progress: number, hint?: string) => void,
+  options?: UploadOptions
 ): Promise<VideoFileAPI> {
   if (shouldUseBlobUpload()) {
     let strategy = await fetchUploadStrategy();
@@ -497,7 +514,7 @@ export async function uploadFileToProject(
     if (strategy === "s3") {
       try {
         const storagePath = await uploadViaS3Presigned(file, projectId, onProgress);
-        return registerStorageAndAnalyze(file, projectId, storagePath, onProgress);
+        return registerStorageAndAnalyze(file, projectId, storagePath, onProgress, options);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (/presign failed|r2 presign|r2 upload failed|сбой сети при загрузке в r2/i.test(msg)) {
@@ -522,14 +539,14 @@ export async function uploadFileToProject(
         throw new Error(blobQuotaUserMessage());
       }
       onProgress(2, "Blob переполнен — пробуем малую загрузку через API…");
-      return uploadViaChunks(file, projectId, onProgress);
+      return uploadViaChunks(file, projectId, onProgress, options);
     }
 
     const uploadUrl = `${getApiBase()}/api/files/blob-upload`;
 
     try {
       const blob = await uploadViaBlob(file, uploadUrl, onProgress);
-      return registerStorageAndAnalyze(file, projectId, blob.url, onProgress);
+      return registerStorageAndAnalyze(file, projectId, blob.url, onProgress, options);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(message)) {
@@ -537,19 +554,19 @@ export async function uploadFileToProject(
           throw new Error(blobQuotaUserMessage());
         }
         onProgress(2, "Blob переполнен — пробуем загрузку через API…");
-        return uploadViaChunks(file, projectId, onProgress);
+        return uploadViaChunks(file, projectId, onProgress, options);
       }
       onProgress(3, "Повторная попытка загрузки…");
       try {
         const blob = await uploadViaBlob(file, uploadUrl, onProgress);
-        return registerStorageAndAnalyze(file, projectId, blob.url, onProgress);
+        return registerStorageAndAnalyze(file, projectId, blob.url, onProgress, options);
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
         if (retryMsg === "BLOB_QUOTA_EXCEEDED" || isBlobQuotaError(retryMsg)) {
           if (!canFallbackToChunks(file)) {
             throw new Error(blobQuotaUserMessage());
           }
-          return uploadViaChunks(file, projectId, onProgress);
+          return uploadViaChunks(file, projectId, onProgress, options);
         }
         throw retryErr;
       }
@@ -558,17 +575,17 @@ export async function uploadFileToProject(
 
   if (shouldUseChunkUpload(file)) {
     try {
-      return await uploadViaChunks(file, projectId, onProgress);
+      return await uploadViaChunks(file, projectId, onProgress, options);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/404/.test(message) && /upload-chunks/i.test(message)) {
         onProgress(3, "Chunk API недоступен, прямая загрузка…");
-        return uploadViaDirectPost(file, projectId, onProgress);
+        return uploadViaDirectPost(file, projectId, onProgress, options);
       }
       throw err;
     }
   }
 
-  return uploadViaDirectPost(file, projectId, onProgress);
+  return uploadViaDirectPost(file, projectId, onProgress, options);
 }
 

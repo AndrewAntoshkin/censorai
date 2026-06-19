@@ -164,6 +164,7 @@ export function ProjectPageClient({ id }: { id: string }) {
                     progress={file.progress}
                     riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
                     reviewCount={file.analysis?.summary?.review_count ?? null}
+                    reportKind={file.analysis?.summary?.report_kind}
                   />
                 </Link>
               ))}
@@ -194,6 +195,7 @@ export function ProjectPageClient({ id }: { id: string }) {
                     progress={file.progress}
                     riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
                     reviewCount={file.analysis?.summary?.review_count ?? null}
+                    reportKind={file.analysis?.summary?.report_kind}
                   />
                 </Link>
               ))}

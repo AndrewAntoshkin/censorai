@@ -300,6 +300,7 @@ export function ReportsTable({
                           progress={file.progress}
                           riskyScenes={file.analysis?.summary?.risky_scenes ?? null}
                           reviewCount={file.analysis?.summary?.review_count ?? null}
+                          reportKind={file.analysis?.summary?.report_kind}
                         />
                       </td>
                       <td className="px-2 py-3 text-right">

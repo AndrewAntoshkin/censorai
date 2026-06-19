@@ -9,6 +9,7 @@ import { riskLevelStyle } from "@/lib/risk";
 import { api, type AnalysisAPI, type SceneAPI } from "@/lib/api";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PlacementReportBody } from "@/components/analysis/placement-report";
 
 const RISK_LABELS: Record<string, string> = {
   drugs: "Наркотики",
@@ -387,6 +388,57 @@ export function AnalysisView({ fileId }: AnalysisViewProps) {
 
   const violationScenes = analysis.scenes.filter((s) => s.risk);
   const summary = analysis.summary;
+  const isPlacement = summary?.report_kind === "placement";
+
+  if (isPlacement && summary) {
+    return (
+      <AppLayout
+        breadcrumb={[
+          { label: "Главная", href: "/" },
+          { label: "Product placement" },
+        ]}
+      >
+        <div className="mx-auto max-w-4xl">
+          <Link
+            href="/reports"
+            className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Назад
+          </Link>
+
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                {analysis.video_title || "Product placement"}
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {[
+                  analysis.duration,
+                  analysis.analyzed_at
+                    ? new Date(analysis.analyzed_at).toLocaleDateString("ru-RU")
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+            <Button
+              className="shrink-0 gap-2 bg-black text-white hover:bg-neutral-800"
+              size="lg"
+              onClick={() => window.open(api.files.getReportUrl(fileId), "_blank")}
+            >
+              <Download className="h-4 w-4" />
+              Скачать
+            </Button>
+          </div>
+
+          <PlacementReportBody analysis={analysis} summary={summary} />
+        </div>
+      </AppLayout>
+    );
+  }
+
   const incomplete = looksIncomplete(summary, analysis, fileDurationSeconds);
   const foreignAgentHits =
     summary?.registry_verifications?.filter(
