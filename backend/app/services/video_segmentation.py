@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 MAX_SEGMENT_SECONDS = settings.REPLICATE_MAX_VIDEO_MINUTES * 60
 MIN_TAIL_SECONDS = 3 * 60
+# Floor for the disk-space estimate: a proportional estimate can undershoot on
+# uneven bitrates, and a few megabytes of slack cost nothing.
+_MIN_SEGMENT_TMP_BYTES = 16 * 1024 * 1024
 # When the tail after a full chunk would be tiny, use a shorter head + bigger tail.
 SHORT_OVERFLOW_FIRST_SECONDS = MAX_SEGMENT_SECONDS - 5 * 60
 
@@ -135,6 +138,52 @@ def probe_duration_seconds(
         return _ffprobe_duration(local)
     finally:
         _cleanup_temps(temps)
+
+
+def _source_size_bytes(source: str) -> int | None:
+    """Size of the ffmpeg input, or None when it cannot be determined cheaply.
+
+    Presigned URLs are signed for GET, so HEAD is rejected; a one-byte ranged
+    GET is accepted and reports the full length in ``Content-Range``.
+    """
+    if source.startswith(("http://", "https://")):
+        try:
+            with httpx.Client(timeout=30, follow_redirects=True) as client:
+                resp = client.get(source, headers={"Range": "bytes=0-0"})
+            resp.raise_for_status()
+            content_range = resp.headers.get("content-range", "")
+            if "/" in content_range:
+                total = content_range.rsplit("/", 1)[1].strip()
+                if total.isdigit():
+                    return int(total)
+            length = resp.headers.get("content-length")
+            return int(length) if resp.status_code == 200 and length else None
+        except (httpx.HTTPError, ValueError):
+            return None
+    try:
+        return Path(source).stat().st_size
+    except OSError:
+        return None
+
+
+def _segment_tmp_bytes(
+    source_bytes: int | None,
+    duration_sec: int,
+    total_duration_sec: int | None,
+    cap_bytes: int,
+) -> int:
+    """Expected size of one cut segment on disk.
+
+    The cut is a stream copy, so its size tracks its share of the source
+    duration. Falling back to the whole-source size would demand hundreds of
+    megabytes for a few-minute slice, which serverless /tmp cannot offer.
+    """
+    if not source_bytes:
+        return cap_bytes
+    if total_duration_sec and total_duration_sec > 0 and duration_sec > 0:
+        share = min(1.0, duration_sec / total_duration_sec)
+        return max(int(source_bytes * share), _MIN_SEGMENT_TMP_BYTES)
+    return min(cap_bytes, source_bytes)
 
 
 def _segment_source(storage_path: str, *, file_id: str | None = None) -> tuple[str, list[Path]]:
@@ -282,6 +331,7 @@ def prepare_single_segment_file(
     *,
     index: int = 0,
     file_id: str | None = None,
+    total_duration_sec: int | None = None,
 ) -> tuple[str, list[Path]]:
     """Cut one range. Caller must delete returned temp paths after upload."""
     if not ffmpeg_binary():
@@ -291,10 +341,18 @@ def prepare_single_segment_file(
         )
 
     _sweep_stale_segment_temps()
+    source, source_temps = _segment_source(storage_path, file_id=file_id)
     # Pre-flight: ensure /tmp can hold the cut output (transient wait if not),
     # so a busy disk re-queues instead of producing a partial file + errno 28.
-    ensure_tmp_space(settings.GEMINI_DIRECT_MAX_SEGMENT_MB * 1024 * 1024)
-    source, source_temps = _segment_source(storage_path, file_id=file_id)
+    cap_bytes = settings.GEMINI_DIRECT_MAX_SEGMENT_MB * 1024 * 1024
+    required = _segment_tmp_bytes(
+        _source_size_bytes(source), duration_sec, total_duration_sec, cap_bytes
+    )
+    try:
+        ensure_tmp_space(required)
+    except Exception:
+        _cleanup_temps(source_temps)
+        raise
     out = Path(tempfile.mkstemp(suffix=f"_seg{index}.mp4")[1])
     try:
         _ffmpeg_segment(source, start_sec, duration_sec, out)

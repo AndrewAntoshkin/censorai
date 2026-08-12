@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.project import VideoFile
 from app.schemas.analysis import (
     GeminiAgeRatingTrigger,
@@ -26,11 +27,13 @@ from app.services.analysis_jobs import get_job_metadata, set_job_metadata
 from app.services.blob_storage import blob_enabled, blob_write_available, delete_urls, put_bytes
 from app.services.object_storage import delete_object
 from app.services.video_segmentation import (
+    MAX_SEGMENT_SECONDS,
     needs_segmentation,
     plan_segment_ranges,
     prepare_single_segment_file,
     probe_duration_seconds,
     segment_prompt_suffix,
+    size_aware_segment_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +65,15 @@ async def prepare_segmented_job(
     plan and cut+upload each segment on demand in `start_segment_prediction`,
     which runs in a separate invocation per segment.
     """
-    ranges = plan_segment_ranges(total_seconds)
+    # Also cap by bytes: a duration-only plan can produce a chunk larger than
+    # the serverless /tmp budget, and the cut would then never fit on disk.
+    max_seg = size_aware_segment_seconds(
+        total_seconds,
+        video.size,
+        MAX_SEGMENT_SECONDS,
+        settings.GEMINI_DIRECT_MAX_SEGMENT_MB,
+    )
+    ranges = plan_segment_ranges(total_seconds, max_seg)
     metadata = {
         "segmented": True,
         "total_duration_sec": total_seconds,
@@ -92,6 +103,7 @@ async def _cut_and_upload_segment(
     source_path: str,
     start_sec: int,
     duration_sec: int,
+    total_duration_sec: int | None = None,
 ) -> str:
     """Cut one segment from the source, upload it, delete the local temp."""
     def _cut() -> tuple[str, list[Path]]:
@@ -101,6 +113,7 @@ async def _cut_and_upload_segment(
             duration_sec,
             index=index,
             file_id=video_id,
+            total_duration_sec=total_duration_sec,
         )
 
     local_path, temps = await asyncio.to_thread(_cut)
@@ -179,7 +192,12 @@ async def start_segment_prediction(
     url = seg_urls[index]
     if not url:
         url = await _cut_and_upload_segment(
-            video.id, index, source_path, start_sec, duration_sec
+            video.id,
+            index,
+            source_path,
+            start_sec,
+            duration_sec,
+            total_duration_sec=int(metadata.get("total_duration_sec") or 0) or None,
         )
         seg_urls[index] = url
         metadata["segment_urls"] = seg_urls

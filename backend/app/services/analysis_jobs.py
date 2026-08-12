@@ -93,6 +93,17 @@ _TRANSIENT_ERROR_MARKERS = (
     "deadline exceeded",
     "remoteprotocolerror",
     "read timed out",
+    # Model returned unusable output (empty / truncated / unparseable JSON).
+    # A genuine content refusal surfaces as a permanent marker below; these are
+    # one-off bad generations that a fresh attempt usually fixes.
+    "empty response from model",
+    "empty response from direct gemini",
+    "empty replicate output",
+    "returned no text output",
+    "cannot find 'scenes' array",
+    "no complete scene objects",
+    "cannot repair json",
+    "failed to parse model response",
 )
 
 # Substrings that mean "this content/file will never pass" — fail fast, no retry.

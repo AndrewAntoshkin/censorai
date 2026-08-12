@@ -208,6 +208,7 @@ async def _run_direct_segment(
             total=total,
             extra_prompt_suffix=metadata.get("extra_prompt_suffix", ""),
             prompt_override=metadata.get("prompt_override"),
+            total_duration_sec=int(metadata.get("total_duration_sec") or 0) or None,
         )
     except ContentBlockedError as exc:
         # One segment refused by every model — skip it (deliver the rest) and

@@ -87,6 +87,7 @@ def run_direct_segment_sync(
     total: int,
     extra_prompt_suffix: str = "",
     prompt_override: str | None = None,
+    total_duration_sec: int | None = None,
 ) -> GeminiAnalysisResult:
     """Cut one segment to a local temp and analyze it via direct Gemini."""
     from app.services.gemini_service import gemini_service
@@ -96,7 +97,12 @@ def run_direct_segment_sync(
     )
 
     local_path, temps = prepare_single_segment_file(
-        source_path, start_sec, duration_sec, index=index, file_id=file_id
+        source_path,
+        start_sec,
+        duration_sec,
+        index=index,
+        file_id=file_id,
+        total_duration_sec=total_duration_sec,
     )
     try:
         extra = (extra_prompt_suffix or "") + segment_prompt_suffix(
@@ -155,6 +161,10 @@ def should_use_direct_gemini_fallback(exc: Exception | str) -> bool:
         "modelerror",
         "prediction failed",
         "prediction ended with status failed",
+        # Succeeded with zero output tokens: retrying the same provider repeats
+        # the empty generation, while the direct path can pick another model.
+        "returned no text output",
+        "empty replicate output",
     )
     return any(marker in msg for marker in markers)
 
