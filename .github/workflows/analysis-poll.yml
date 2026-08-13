@@ -8,15 +8,14 @@ name: Analysis poll
 #
 # GitHub's scheduler is unreliable: a "*/5" cron is throttled and routinely
 # skipped for hours under load. To survive that, each run self-loops for ~58
-# minutes, and `concurrency` + `cancel-in-progress: false` makes the next
-# scheduled run queue behind the active one and start the moment it ends —
-# giving near-continuous polling even if the scheduler only fires sporadically.
-# This repo is public, so Actions minutes are free and unlimited.
+# minutes at 30s intervals, and `concurrency` + `cancel-in-progress: false`
+# makes the next scheduled run queue behind the active one and start the moment
+# it ends — giving near-continuous 30s polling even if the scheduler only fires
+# sporadically. This repo is public, so Actions minutes are free and unlimited.
 #
-# The interval must stay well above a cold boot (~75s on Vercel): a serverless
-# instance serves one request at a time, so polling faster than it boots keeps
-# every instance permanently occupied by a booting poll, and real user requests
-# are then forced to boot their own instance — a minute per page view.
+# The secret must match WORKER_DEV_POLL_SECRET in the deployment environment:
+# a mismatch makes every tick a silent 403, and queued analyses then only move
+# while someone keeps a file page open in a browser.
 
 on:
   schedule:
@@ -33,7 +32,7 @@ jobs:
     # Hard cap so a hung run cannot block the queued next run indefinitely.
     timeout-minutes: 62
     steps:
-      - name: Drive analysis poll cycle (~58 min of 3 min ticks)
+      - name: Drive analysis poll cycle (~58 min of 30s ticks)
         run: |
           url="https://censorai.vercel.app/api/worker/poll-once?secret=censor-demo-2026"
           # Stop a bit before timeout-minutes so the queued run can take over.
@@ -45,6 +44,6 @@ jobs:
             echo "tick $tick (t=${SECONDS}s) -> HTTP $code"
             head -c 400 /tmp/poll_out || true
             echo
-            sleep 180
+            sleep 30
           done
           echo "Completed $tick ticks over ${SECONDS}s"
